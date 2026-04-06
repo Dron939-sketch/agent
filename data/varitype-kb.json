@@ -1,0 +1,362 @@
+{
+  "version": "2.0",
+  "description": "База знаний Вариатика для ИИ-агента",
+  "mapping": {
+    "test_to_varitype": {
+      "1": 6,
+      "2": 7,
+      "3": 8,
+      "4": 9,
+      "5": 10,
+      "6": 11
+    },
+    "level_names": {
+      "6": "Шестёрка",
+      "7": "Семёрка",
+      "8": "Восьмёрка",
+      "9": "Девятка",
+      "10": "Десятка",
+      "11": "Мастер"
+    }
+  },
+  "vectors": {
+    "СБ": {
+      "name": "Силовик",
+      "essence": "Выживает через контроль силы",
+      "core_fear": "Физическая боль, унижение, слабость",
+      "core_need": "Безопасность и уважение через силу",
+      "levels": {
+        "1": {
+          "level_name": "Шестёрка — Жертва",
+          "what_they_need": "Научиться базовой самозащите и говорить «нет»",
+          "how_to_lead": "Не давить, мягко укреплять границы, хвалить за малые победы",
+          "typical_misrequest": "Уберите от меня всех",
+          "ai_should_avoid": "Не критиковать за слабость, не давить",
+          "behavior": {
+            "stress_response": "Замирает, оцепенение",
+            "blind_spot": "Не видит возможности защититься"
+          },
+          "communication": {
+            "preference": "Мягкий, без давления",
+            "message_format": "Спокойно, поддерживающе",
+            "what_to_avoid": "Громкий голос, критика",
+            "trust_triggers": "Спокойствие, безопасность"
+          },
+          "growth": {
+            "next_level": "Семёрка",
+            "key_shift": "От «замереть» к «убежать»"
+          }
+        },
+        "2": {
+          "level_name": "Семёрка — Избегающий",
+          "what_they_need": "Понять, что избегание не решает проблемы",
+          "how_to_lead": "Показывать, что конфликты неизбежны и это нормально",
+          "typical_misrequest": "Сделайте чтобы меня не трогали",
+          "ai_should_avoid": "Не заставлять идти в конфликт сразу",
+          "behavior": {
+            "stress_response": "Избегает, отворачивается",
+            "blind_spot": "Не видит, что конфликты неизбежны"
+          },
+          "communication": {
+            "preference": "Кратко, без эмоций",
+            "message_format": "По делу",
+            "what_to_avoid": "Долгих объяснений",
+            "trust_triggers": "Надёжность, предсказуемость"
+          },
+          "growth": {
+            "next_level": "Восьмёрка",
+            "key_shift": "От «убежать» к «дать сдачи»"
+          }
+        },
+        "3": {
+          "level_name": "Восьмёрка — Провокатор",
+          "what_they_need": "Научиться контролировать агрессию",
+          "how_to_lead": "Направить в спорт с дисциплиной",
+          "typical_misrequest": "Научите побеждать",
+          "ai_should_avoid": "Не поощрять уличные драки",
+          "behavior": {
+            "stress_response": "Провоцирует, тестирует",
+            "blind_spot": "Не видит последствий агрессии"
+          },
+          "communication": {
+            "preference": "Прямо и жёстко",
+            "message_format": "Чётко, без намёков",
+            "what_to_avoid": "Слабость, неуверенность",
+            "trust_triggers": "Сила, уверенность"
+          },
+          "growth": {
+            "next_level": "Девятка",
+            "key_shift": "От «провоцировать» к «защищать»"
+          }
+        },
+        "4": {
+          "level_name": "Девятка — Защитник",
+          "what_they_need": "Монетизировать свою силу",
+          "how_to_lead": "Помогать переходить от «быть сильным» к «продавать силу»",
+          "typical_misrequest": "Хочу быть сильным",
+          "ai_should_avoid": "Не предлагать насилие как решение",
+          "behavior": {
+            "stress_response": "Защищается, контролирует",
+            "blind_spot": "Не видит дипломатию"
+          },
+          "communication": {
+            "preference": "Чётко по делу",
+            "message_format": "Кратко, структурированно",
+            "what_to_avoid": "Лишних деталей",
+            "trust_triggers": "Компетентность"
+          },
+          "growth": {
+            "next_level": "Десятка",
+            "key_shift": "От «защищать» к «продавать»"
+          }
+        },
+        "5": {
+          "level_name": "Десятка — Профессионал",
+          "what_they_need": "Перейти от продажи времени к продаже результата",
+          "how_to_lead": "Направлять к предпринимательству",
+          "typical_misrequest": "Хочу повышения зарплаты",
+          "ai_should_avoid": "Не ограничивать рамками найма",
+          "behavior": {
+            "stress_response": "Применяет силу контролируемо",
+            "blind_spot": "Не видит предпринимательство"
+          },
+          "communication": {
+            "preference": "Стратегически",
+            "message_format": "План, цели, результаты",
+            "what_to_avoid": "Микроменеджмента",
+            "trust_triggers": "Результаты, KPI"
+          },
+          "growth": {
+            "next_level": "Валет",
+            "key_shift": "От «продавать время» к «продавать результат»"
+          }
+        },
+        "6": {
+          "level_name": "Мастер",
+          "what_they_need": "Интеграция с другими мастями",
+          "how_to_lead": "Развивать мудрость и влияние",
+          "typical_misrequest": "Как наказать конкурента",
+          "ai_should_avoid": "Не поощрять злоупотребление силой",
+          "behavior": {
+            "stress_response": "Создаёт системы защиты",
+            "blind_spot": "Может злоупотреблять властью"
+          },
+          "communication": {
+            "preference": "На равных",
+            "message_format": "Стратегически, системно",
+            "what_to_avoid": "Панибратства",
+            "trust_triggers": "Мудрость, видение"
+          },
+          "growth": {
+            "next_level": "Дама+",
+            "key_shift": "От «личной силы» к «системе»"
+          }
+        }
+      }
+    },
+    "ТФ": {
+      "name": "Трудяга",
+      "essence": "Выживает через создание ценности",
+      "core_fear": "Бедность, ненужность, нестабильность",
+      "core_need": "Стабильность и признание через результат",
+      "levels": {
+        "1": {
+          "level_name": "Шестёрка — Лентяй",
+          "what_they_need": "Понять связь между трудом и результатом",
+          "how_to_lead": "Маленькие шаги, быстрая обратная связь",
+          "typical_misrequest": "Дайте денег",
+          "ai_should_avoid": "Не давить, не перегружать",
+          "behavior": {"stress_response": "Уходит от работы", "blind_spot": "Не видит связи труда и результата"},
+          "communication": {"preference": "Простой", "message_format": "Простыми словами", "what_to_avoid": "Сложных терминов", "trust_triggers": "Простота, понятность"},
+          "growth": {"next_level": "Семёрка", "key_shift": "Увидеть: работа → деньги"}
+        },
+        "2": {
+          "level_name": "Семёрка — Исполнитель",
+          "what_they_need": "Научиться выбирать и нести ответственность",
+          "how_to_lead": "Постепенно передавать выбор, хвалить за инициативу",
+          "typical_misrequest": "Скажите, что мне делать",
+          "ai_should_avoid": "Не оставлять без инструкций",
+          "behavior": {"stress_response": "Теряется без инструкций", "blind_spot": "Не видит возможности выбора"},
+          "communication": {"preference": "Инструктивный", "message_format": "Чёткие инструкции", "what_to_avoid": "Неопределённости", "trust_triggers": "Компетентность"},
+          "growth": {"next_level": "Восьмёрка", "key_shift": "Взять ответственность за маленький проект"}
+        },
+        "3": {
+          "level_name": "Восьмёрка — Охотник за зарплатой",
+          "what_they_need": "Понять, что навыки ценнее сиюминутной выгоды",
+          "how_to_lead": "Показывать долгосрочную выгоду инвестиций в себя",
+          "typical_misrequest": "Где больше платят",
+          "ai_should_avoid": "Не обещать быстрых денег",
+          "behavior": {"stress_response": "Паникует при падении дохода", "blind_spot": "Не видит перспективу"},
+          "communication": {"preference": "Практичный", "message_format": "Цифры, факты", "what_to_avoid": "Абстракций", "trust_triggers": "Результаты"},
+          "growth": {"next_level": "Девятка", "key_shift": "Инвестировать в навыки"}
+        },
+        "4": {
+          "level_name": "Девятка — Мастер-одиночка",
+          "what_they_need": "Научиться делегировать и масштабироваться",
+          "how_to_lead": "Показывать выгоду от команды",
+          "typical_misrequest": "Как работать меньше",
+          "ai_should_avoid": "Не предлагать работу за спасибо",
+          "behavior": {"stress_response": "Выгорает от переработок", "blind_spot": "Не видит выгоды делегирования"},
+          "communication": {"preference": "Деловой", "message_format": "Процессы, системы", "what_to_avoid": "Хаоса", "trust_triggers": "Надёжность"},
+          "growth": {"next_level": "Десятка", "key_shift": "Найти первого помощника"}
+        },
+        "5": {
+          "level_name": "Десятка — Организатор",
+          "what_they_need": "Перейти от услуг к товарам или активам",
+          "how_to_lead": "Направлять к созданию продуктов",
+          "typical_misrequest": "Как найти хороших работников",
+          "ai_should_avoid": "Не ограничивать услугами",
+          "behavior": {"stress_response": "Беспокоится при сбоях системы", "blind_spot": "Не видит продуктового подхода"},
+          "communication": {"preference": "Системный", "message_format": "Схемы, алгоритмы", "what_to_avoid": "Эмоций", "trust_triggers": "Логика"},
+          "growth": {"next_level": "Валет", "key_shift": "Создать продукт"}
+        },
+        "6": {
+          "level_name": "Мастер",
+          "what_they_need": "Интеграция с ЧВ (влияние) и УБ (стратегия)",
+          "how_to_lead": "Развивать видение и влияние",
+          "typical_misrequest": "Как задавить конкурентов",
+          "ai_should_avoid": "Не ограничивать эффективностью",
+          "behavior": {"stress_response": "Теряет интерес при идеальной работе", "blind_spot": "Не видит ценности влияния"},
+          "communication": {"preference": "Партнёрский", "message_format": "Стратегия, видение", "what_to_avoid": "Рутины", "trust_triggers": "Видение"},
+          "growth": {"next_level": "Дама+", "key_shift": "Создать империю"}
+        }
+      }
+    },
+    "УБ": {
+      "name": "Умный",
+      "essence": "Выживает через понимание мира",
+      "core_fear": "Выглядеть глупо, ошибиться, не понять",
+      "core_need": "Истина и компетентность",
+      "levels": {
+        "1": {
+          "level_name": "Шестёрка — Избегающий познания",
+          "what_they_need": "Пробудить любопытство",
+          "how_to_lead": "Простые объяснения, связь с практикой",
+          "typical_misrequest": "Не грузите меня",
+          "ai_should_avoid": "Сложных терминов",
+          "behavior": {"stress_response": "Уходит от сложных вопросов", "blind_spot": "Не видит пользы знаний"},
+          "communication": {"preference": "Простой", "message_format": "Практично, без теории", "what_to_avoid": "Абстракций", "trust_triggers": "Понятность"},
+          "growth": {"next_level": "Семёрка", "key_shift": "Задать первый вопрос «почему?»"}
+        },
+        "2": {
+          "level_name": "Семёрка — Магическое мышление",
+          "what_they_need": "Научиться видеть причинно-следственные связи",
+          "how_to_lead": "Не высмеивать, мягко показывать логику",
+          "typical_misrequest": "Что мне звёзды говорят",
+          "ai_should_avoid": "Высмеивать веру в знаки",
+          "behavior": {"stress_response": "Ищет знаки и приметы", "blind_spot": "Не видит реальных причин"},
+          "communication": {"preference": "Доверительный", "message_format": "Мягко, без критики", "what_to_avoid": "Резких опровержений", "trust_triggers": "Уважение"},
+          "growth": {"next_level": "Восьмёрка", "key_shift": "Проверить предсказание на практике"}
+        },
+        "3": {
+          "level_name": "Восьмёрка — Конспиролог",
+          "what_they_need": "Научиться проверять информацию самостоятельно",
+          "how_to_lead": "Предлагать проверять факты, давать инструменты",
+          "typical_misrequest": "Докажите, что заговор существует",
+          "ai_should_avoid": "Не вступать в споры о заговорах",
+          "behavior": {"stress_response": "Ищет заговоры", "blind_spot": "Не видит простых объяснений"},
+          "communication": {"preference": "Аргументированный", "message_format": "Факты, источники", "what_to_avoid": "Эмоций", "trust_triggers": "Логика"},
+          "growth": {"next_level": "Девятка", "key_shift": "Проверить одну теорию фактами"}
+        },
+        "4": {
+          "level_name": "Девятка — Догматик",
+          "what_they_need": "Научиться проверять авторитетов",
+          "how_to_lead": "Показывать, что авторитеты ошибаются",
+          "typical_misrequest": "Что говорят эксперты",
+          "ai_should_avoid": "Не ссылаться на сомнительных авторитетов",
+          "behavior": {"stress_response": "Ищет авторитета", "blind_spot": "Не проверяет источники"},
+          "communication": {"preference": "Авторитетный", "message_format": "Со ссылками на экспертов", "what_to_avoid": "Субъективных мнений", "trust_triggers": "Компетентность"},
+          "growth": {"next_level": "Десятка", "key_shift": "Усомниться в авторитете"}
+        },
+        "5": {
+          "level_name": "Десятка — Эмпирик",
+          "what_they_need": "Научиться доверять логике и системам",
+          "how_to_lead": "Переводить от опыта к системам",
+          "typical_misrequest": "Покажите мне",
+          "ai_should_avoid": "Не предлагать непроверенное",
+          "behavior": {"stress_response": "Не доверяет, пока не проверит", "blind_spot": "Не видит абстракций"},
+          "communication": {"preference": "Доказательный", "message_format": "Данные, эксперименты", "what_to_avoid": "Спекуляций", "trust_triggers": "Проверяемость"},
+          "growth": {"next_level": "Валет", "key_shift": "Принять абстракцию"}
+        },
+        "6": {
+          "level_name": "Мастер",
+          "what_they_need": "Интеграция с ЧВ (передать знания) и ТФ (применить)",
+          "how_to_lead": "Развивать коммуникацию",
+          "typical_misrequest": "Почему никто не понимает мои идеи",
+          "ai_should_avoid": "Не изолироваться в теориях",
+          "behavior": {"stress_response": "Разочаровывается при неприятии идей", "blind_spot": "Не умеет доносить знания"},
+          "communication": {"preference": "Просветительский", "message_format": "Обучение, передача", "what_to_avoid": "Снобизма", "trust_triggers": "Глубина"},
+          "growth": {"next_level": "Дама+", "key_shift": "Научить другого"}
+        }
+      }
+    },
+    "ЧВ": {
+      "name": "Влиятель",
+      "essence": "Выживает через влияние на людей",
+      "core_fear": "Одиночество, отвержение, изоляция",
+      "core_need": "Признание и влияние через отношения",
+      "levels": {
+        "1": {
+          "level_name": "Шестёрка — Жертва-манипулятор",
+          "what_they_need": "Осознать свои манипуляции",
+          "how_to_lead": "Мягко показывать паттерн, не обвиняя",
+          "typical_misrequest": "Помогите, у меня всё плохо",
+          "ai_should_avoid": "Не поддаваться на манипуляции",
+          "behavior": {"stress_response": "Плачет, жалуется", "blind_spot": "Не видит своей роли"},
+          "communication": {"preference": "Эмпатичный", "message_format": "Тепло, с поддержкой", "what_to_avoid": "Холодности", "trust_triggers": "Забота"},
+          "growth": {"next_level": "Семёрка", "key_shift": "Услышать «ты манипулируешь»"}
+        },
+        "2": {
+          "level_name": "Семёрка — Хамелеон",
+          "what_they_need": "Найти себя",
+          "how_to_lead": "Помогать исследовать свои желания",
+          "typical_misrequest": "Как понравиться людям",
+          "ai_should_avoid": "Не поддерживать копирование",
+          "behavior": {"stress_response": "Теряет себя в компании", "blind_spot": "Не знает своих желаний"},
+          "communication": {"preference": "Исследовательский", "message_format": "Вопросы, рефлексия", "what_to_avoid": "Давления", "trust_triggers": "Принятие"},
+          "growth": {"next_level": "Восьмёрка", "key_shift": "Понравиться без маски"}
+        },
+        "3": {
+          "level_name": "Восьмёрка — Мошенник",
+          "what_they_need": "Понять, что манипуляция разрушает",
+          "how_to_lead": "Показывать долгосрочные последствия",
+          "typical_misrequest": "Как убедить любого",
+          "ai_should_avoid": "Не учить манипуляциям",
+          "behavior": {"stress_response": "Боится разоблачения", "blind_spot": "Не видит последствий"},
+          "communication": {"preference": "Честный", "message_format": "Прямо о последствиях", "what_to_avoid": "Игры", "trust_triggers": "Честность"},
+          "growth": {"next_level": "Девятка", "key_shift": "Попасться на манипуляции"}
+        },
+        "4": {
+          "level_name": "Девятка — Читатель мотивов",
+          "what_they_need": "Перейти от использования к служению",
+          "how_to_lead": "Перенаправлять: «как ты можешь помочь?»",
+          "typical_misrequest": "Как заставить его сделать",
+          "ai_should_avoid": "Не поддерживать контроль",
+          "behavior": {"stress_response": "Манипулирует даже без нужды", "blind_spot": "Не видит альтернатив"},
+          "communication": {"preference": "Коучинговый", "message_format": "Вопросы, направления", "what_to_avoid": "Советов", "trust_triggers": "Понимание"},
+          "growth": {"next_level": "Десятка", "key_shift": "Помочь вместо использования"}
+        },
+        "5": {
+          "level_name": "Десятка — Системный влиятель",
+          "what_they_need": "Монетизировать влияние",
+          "how_to_lead": "Направлять к созданию бренда",
+          "typical_misrequest": "Как получить должность",
+          "ai_should_avoid": "Не ограничивать наймом",
+          "behavior": {"stress_response": "Теряется при сбое системы", "blind_spot": "Не видит монетизации"},
+          "communication": {"preference": "Стратегический", "message_format": "Связи, возможности", "what_to_avoid": "Бюрократии", "trust_triggers": "Влияние"},
+          "growth": {"next_level": "Валет", "key_shift": "Создать личный бренд"}
+        },
+        "6": {
+          "level_name": "Мастер",
+          "what_they_need": "Интеграция с УБ (понимание) и СБ (защита)",
+          "how_to_lead": "Развивать мудрость и защиту",
+          "typical_misrequest": "Как стать ещё влиятельнее",
+          "ai_should_avoid": "Не поощрять манипуляции",
+          "behavior": {"stress_response": "Боится потерять связь с реальностью", "blind_spot": "Может злоупотреблять влиянием"},
+          "communication": {"preference": "Мудрый", "message_format": "Глубоко, с заботой", "what_to_avoid": "Поверхностности", "trust_triggers": "Мудрость"},
+          "growth": {"next_level": "Дама+", "key_shift": "Создать движение"}
+        }
+      }
+    }
+  }
+}
