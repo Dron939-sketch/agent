@@ -15,6 +15,7 @@ from . import agents as agents_router
 from . import auth as auth_router
 from . import chat as chat_router
 from . import system as system_router
+from . import voice as voice_router
 
 logger = get_logger(__name__)
 
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router.router)
     app.include_router(chat_router.router)
     app.include_router(agents_router.router)
+    app.include_router(voice_router.router)
 
     return app
 
