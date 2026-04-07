@@ -1,15 +1,8 @@
-"""Chat-роуты с памятью, эмоциями, контекст-агрегатором и SSE-стримом.
-
-PR autonomy fix:
-- `_maybe_extract_facts` теперь запускается **фоновым** таском, чтобы
-  не блокировать ответ пользователю на 5–10 секунд (LLM-вызов).
-- Убран лишний `await session.commit()` в `event_source` — `get_session`
-  Depends уже коммитит сама после завершения StreamingResponse.
-- Убран мёртвый артефакт `[:-0] if False else …`.
-"""
+"""Chat-роуты с памятью, эмоциями, контекст-агрегатором и SSE-стримом."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, BackgroundTasks, Depends
@@ -76,7 +69,6 @@ def _ctx_messages(
 
 
 async def _extract_facts_bg(user_id: str, history: list[dict]) -> None:
-    """Фоновое извлечение фактов из истории. Не блокирует ответ."""
     if not history or len(history) % FACT_EXTRACT_EVERY != 0:
         return
     try:
@@ -100,7 +92,6 @@ async def _extract_facts_bg(user_id: str, history: list[dict]) -> None:
 
 
 async def _store_chat_memory(user_id: str, user_msg: str, assistant_msg: str) -> None:
-    """Фоновое сохранение пары сообщений в векторную память."""
     try:
         await default_memory().add(
             [
@@ -138,7 +129,6 @@ async def send(
     aggregator = ContextAggregator(session, emotion_service=emotion_service)
     full_ctx = await aggregator.get_full_context(user.user_id, body.message)
 
-    # Логируем эмоцию (синхронно — пишем в ту же сессию)
     if full_ctx.emotion:
         try:
             await EmotionRepository(session).add(
@@ -152,16 +142,12 @@ async def send(
         except Exception as exc:
             logger.warning("emotion log failed: %s", exc)
 
-    # `aggregator.get_full_context` уже включает только-что добавленное
-    # сообщение пользователя в `history`. Срезаем последнее, чтобы не
-    # дублировать его при формировании промпта.
     history_rows = full_ctx.history[:-1] if full_ctx.history else []
     messages = _ctx_messages(BASE_SYSTEM, full_ctx, history_rows, body.message)
 
     response = await default_router().chat(messages, profile=body.profile)  # type: ignore[arg-type]
     await convos.add(user.user_id, "assistant", response.text)
 
-    # Тяжёлые операции — в фон, чтобы ответ улетел немедленно
     if body.use_memory:
         background.add_task(_store_chat_memory, user.user_id, body.message, response.text)
     background.add_task(
@@ -219,14 +205,14 @@ async def stream(
         try:
             async for chunk in default_router().stream(messages, profile=profile):  # type: ignore[arg-type]
                 collected.append(chunk)
-                yield f"data: {chunk}\n\n".encode()
+                # Кодируем чанк как JSON, чтобы пробелы и переводы строк
+                # передавались БУКВАЛЬНО, не теряясь в SSE-парсере.
+                payload = json.dumps({"t": chunk}, ensure_ascii=False)
+                yield f"data: {payload}\n\n".encode("utf-8")
             yield b"event: done\ndata: end\n\n"
         finally:
             full = "".join(collected)
             if full:
-                # Используем отдельный session_scope, чтобы НЕ зависеть от
-                # уже-возможно-закрытой Depends-сессии. Это важно: когда
-                # StreamingResponse завершается, FastAPI чистит зависимости.
                 from app.db import session_scope
 
                 try:
