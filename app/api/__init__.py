@@ -11,6 +11,7 @@ from app.core.config import Config
 from app.core.logging import get_logger, setup_logging
 from app.core.observability import init_sentry
 from app.db import dispose_db, init_db
+from app.plugins import load_plugins
 
 from . import agents as agents_router
 from . import auth as auth_router
@@ -28,11 +29,13 @@ async def lifespan(_app: FastAPI):  # noqa: ANN201
     init_sentry()
     Config.ensure_dirs()
     await init_db()
+    plugins = load_plugins()
     logger.info(
-        "🚀 %s %s started (env=%s)",
+        "🚀 %s %s started (env=%s, plugins=%d)",
         Config.APP_NAME,
         Config.APP_VERSION,
         Config.ENVIRONMENT,
+        len(plugins),
     )
     try:
         yield
