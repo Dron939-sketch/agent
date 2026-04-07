@@ -20,6 +20,11 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "Фреди"
+  },
+  formatDetection: {
+    telephone: false,
+    email: false,
+    address: false
   }
 };
 
@@ -27,8 +32,11 @@ export const viewport: Viewport = {
   themeColor: "#a855f7",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false
+  // Разрешаем зум — это accessibility-требование, особенно для слабовидящих.
+  // Для PWA-режима apple-mobile-web-app-capable=yes всё равно скрывает UI зума.
+  maximumScale: 5,
+  userScalable: true,
+  viewportFit: "cover"
 };
 
 export default function RootLayout({
