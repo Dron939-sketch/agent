@@ -1,0 +1,30 @@
+# Caddyfile для Фреди.
+# В dev — :80; в проде замени на свой домен (например freddy.example.com),
+# Caddy сам выпустит TLS через Let's Encrypt.
+
+:80 {
+    encode zstd gzip
+
+    # API + WebSocket в первую очередь
+    @api path /api/* /health /version
+    handle @api {
+        reverse_proxy api:8000
+    }
+
+    # Service worker должен жить в корне без кеша
+    @sw path /sw.js
+    handle @sw {
+        header Cache-Control "no-store"
+        reverse_proxy frontend:3000
+    }
+
+    # Всё остальное — Next.js
+    handle {
+        reverse_proxy frontend:3000
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
