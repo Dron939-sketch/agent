@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
+import { LogIn, LogOut } from "lucide-react";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { AgentTimeline } from "@/components/timeline/AgentTimeline";
 import { DashboardTiles } from "@/components/dashboard/DashboardTiles";
 import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
+import { useSession } from "@/store/session";
 
 const FreddyAvatar = dynamic(
   () => import("@/components/avatar/FreddyAvatar").then((m) => m.FreddyAvatar),
@@ -17,6 +19,18 @@ type AgentState = "idle" | "thinking" | "speaking";
 
 export default function HomePage() {
   const [agentState, setAgentState] = useState<AgentState>("idle");
+  const token = useSession((s) => s.token);
+  const username = useSession((s) => s.username);
+  const logout = useSession((s) => s.logout);
+
+  function openAuth() {
+    window.dispatchEvent(new CustomEvent("freddy:open-auth"));
+  }
+
+  function doLogout() {
+    localStorage.removeItem("freddy_token");
+    logout();
+  }
 
   return (
     <main className="relative min-h-screen">
@@ -33,13 +47,29 @@ export default function HomePage() {
             <div className="text-xs text-slate-400">всемогущий AI-помощник</div>
           </div>
         </motion.div>
-        <nav className="hidden gap-6 text-sm text-slate-400 md:flex">
+        <nav className="hidden gap-6 text-sm text-slate-400 md:flex md:items-center">
           <a className="hover:text-white" href="#chat">Чат</a>
           <a className="hover:text-white" href="#agents">Агенты</a>
           <a className="hover:text-white" href="#dashboard">Дашборд</a>
           <kbd className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-slate-400">
             ⌘K
           </kbd>
+          {token ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-300">@{username}</span>
+              <button
+                onClick={doLogout}
+                className="flex items-center gap-1 rounded-lg border border-white/10 px-3 py-1 text-xs hover:border-neon-pink/40 hover:text-white"
+              >
+                <LogOut className="h-3 w-3" />
+                Выйти
+              </button>
+            </div>
+          ) : (
+            <button onClick={openAuth} className="btn-primary px-4 py-2 text-xs">
+              <LogIn className="mr-1 h-3 w-3" /> Войти
+            </button>
+          )}
         </nav>
       </header>
 
@@ -64,7 +94,7 @@ export default function HomePage() {
       <VoiceRecorder />
 
       <footer className="px-8 pb-10 text-center text-xs text-slate-500">
-        Фаза 3 · WOW UI · Next.js 14 + R3F + Framer Motion · PWA
+        Фреди · Next.js 14 + R3F + Framer Motion · PWA · autonomous
       </footer>
     </main>
   );
