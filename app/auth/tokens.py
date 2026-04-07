@@ -1,8 +1,4 @@
-"""JWT access/refresh токены на чистом hmac+base64 (без внешних зависимостей).
-
-Можно безболезненно заменить на PyJWT в следующем PR — здесь специально
-без новой зависимости, чтобы CI оставался лёгким.
-"""
+"""JWT access/refresh токены на чистом hmac+base64 (без внешних зависимостей)."""
 
 from __future__ import annotations
 
@@ -10,15 +6,39 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import Config
 
+logger = logging.getLogger(__name__)
+
 ALGORITHM = "HS256"
 ACCESS_TTL_SECONDS = 60 * 60          # 1 час
 REFRESH_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 дней
+
+# Стабильный per-process кеш SECRET_KEY: вычисляется один раз при первом
+# использовании, читая ENV (а не Config-snapshot модуля). Это критично для
+# мульти-воркерного uvicorn: каждый воркер должен использовать ОДИН и тот же
+# секрет, иначе токены становятся невалидными между запросами.
+_secret_cache: bytes | None = None
+
+
+def _secret() -> bytes:
+    global _secret_cache
+    if _secret_cache is not None:
+        return _secret_cache
+    raw = os.environ.get("SECRET_KEY") or Config.SECRET_KEY
+    if not raw or raw == "change-me":
+        logger.warning(
+            "⚠️ SECRET_KEY не задан или равен placeholder — токены не будут "
+            "переживать рестарты. Установи SECRET_KEY в env."
+        )
+    _secret_cache = raw.encode("utf-8")
+    return _secret_cache
 
 
 class TokenError(Exception):
@@ -41,8 +61,7 @@ def _b64url_decode(data: str) -> bytes:
 
 
 def _sign(message: bytes) -> bytes:
-    secret = Config.SECRET_KEY.encode("utf-8")
-    return hmac.new(secret, message, hashlib.sha256).digest()
+    return hmac.new(_secret(), message, hashlib.sha256).digest()
 
 
 def encode(payload: dict[str, Any]) -> str:
@@ -72,8 +91,12 @@ def decode(token: str) -> dict[str, Any]:
 
 def create_pair(user_id: str) -> TokenPair:
     now = int(time.time())
-    access = encode({"sub": user_id, "type": "access", "iat": now, "exp": now + ACCESS_TTL_SECONDS})
-    refresh = encode({"sub": user_id, "type": "refresh", "iat": now, "exp": now + REFRESH_TTL_SECONDS})
+    access = encode(
+        {"sub": user_id, "type": "access", "iat": now, "exp": now + ACCESS_TTL_SECONDS}
+    )
+    refresh = encode(
+        {"sub": user_id, "type": "refresh", "iat": now, "exp": now + REFRESH_TTL_SECONDS}
+    )
     return TokenPair(access=access, refresh=refresh)
 
 

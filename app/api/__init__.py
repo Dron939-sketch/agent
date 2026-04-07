@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.autonomy import get_autonomy_loop
 from app.core.config import Config
 from app.core.logging import get_logger, setup_logging
 from app.core.observability import init_sentry
@@ -30,16 +31,22 @@ async def lifespan(_app: FastAPI):  # noqa: ANN201
     Config.ensure_dirs()
     await init_db()
     plugins = load_plugins()
+
+    autonomy = get_autonomy_loop()
+    await autonomy.start()
+
     logger.info(
-        "🚀 %s %s started (env=%s, plugins=%d)",
+        "🚀 %s %s started (env=%s, plugins=%d, self_url=%s)",
         Config.APP_NAME,
         Config.APP_VERSION,
         Config.ENVIRONMENT,
         len(plugins),
+        autonomy.self_url or "—",
     )
     try:
         yield
     finally:
+        await autonomy.stop()
         await dispose_db()
         logger.info("👋 shutdown complete")
 
@@ -51,8 +58,8 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS: allow_credentials=True не работает с allow_origins=["*"],
-    # поэтому используем regex, разрешающий любые onrender.com и localhost.
+    # CORS: regex для *.onrender.com + localhost. allow_credentials=True
+    # требует явных origins, поэтому wildcard "*" использовать нельзя.
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"https?://(.*\.onrender\.com|localhost(:\d+)?|127\.0\.0\.1(:\d+)?)",

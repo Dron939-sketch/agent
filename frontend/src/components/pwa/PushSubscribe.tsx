@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { getVapidPublicKey, subscribePush } from "@/lib/api";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -32,8 +33,7 @@ export function PushSubscribe() {
         const permission = await Notification.requestPermission();
         if (permission !== "granted") return;
 
-        const keyRes = await fetch("/api/backend/push/public-key");
-        const { key } = (await keyRes.json()) as { key: string };
+        const key = await getVapidPublicKey();
         if (!key || cancelled) return;
 
         const sub = await reg.pushManager.subscribe({
@@ -41,14 +41,7 @@ export function PushSubscribe() {
           applicationServerKey: urlBase64ToUint8Array(key)
         });
 
-        await fetch("/api/backend/push/subscribe", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify(sub.toJSON())
-        });
+        await subscribePush(sub.toJSON());
       } catch (err) {
         console.warn("push subscribe failed:", err);
       }

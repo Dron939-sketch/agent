@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mic, MicOff, X } from "lucide-react";
+import { transcribeAudio } from "@/lib/api";
+import { SilenceDetector } from "@/lib/vad";
 
 type Props = {
   onTranscript?: (text: string) => void;
@@ -19,6 +21,7 @@ export function VoiceRecorder({ onTranscript }: Props) {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const vadRef = useRef<SilenceDetector | null>(null);
 
   async function start() {
     setError(null);
@@ -50,6 +53,19 @@ export function VoiceRecorder({ onTranscript }: Props) {
       };
       rafRef.current = requestAnimationFrame(tick);
 
+      // Авто-стоп по тишине (VAD из lib/vad.ts)
+      const vad = new SilenceDetector(stream, ctx, {
+        onSilence: () => {
+          if (recorderRef.current && recorderRef.current.state === "recording") {
+            stop();
+          }
+        },
+        threshold: 0.05,
+        silenceMs: 1500
+      });
+      vad.start();
+      vadRef.current = vad;
+
       const recorder = new MediaRecorder(stream);
       chunksRef.current = [];
       recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
@@ -65,31 +81,30 @@ export function VoiceRecorder({ onTranscript }: Props) {
     }
   }
 
-  async function stop() {
-    recorderRef.current?.stop();
+  function stop() {
+    try {
+      recorderRef.current?.stop();
+    } catch {}
     mediaRef.current?.getTracks().forEach((t) => t.stop());
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    audioCtxRef.current?.close();
+    audioCtxRef.current?.close().catch(() => {});
+    vadRef.current?.stop();
     rafRef.current = null;
+    vadRef.current = null;
     setRecording(false);
     setLevel(new Array(48).fill(0));
   }
 
   async function send(blob: Blob) {
-    // endpoint опционален — если на бэке нет /api/voice/stt, молча пропустим
     try {
-      const fd = new FormData();
-      fd.append("audio", blob, "voice.webm");
-      const res = await fetch("/api/backend/voice/stt", { method: "POST", body: fd });
-      if (!res.ok) return;
-      const data = (await res.json()) as { text?: string };
-      if (data.text) onTranscript?.(data.text);
-    } catch {
-      /* no-op */
+      const result = await transcribeAudio(blob);
+      if (result.text) onTranscript?.(result.text);
+    } catch (err) {
+      setError((err as Error).message);
     }
   }
 
-  useEffect(() => () => void stop(), []);
+  useEffect(() => () => stop(), []);
 
   return (
     <>

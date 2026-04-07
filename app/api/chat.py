@@ -1,10 +1,18 @@
-"""Chat-роуты с памятью, эмоциями, контекст-агрегатором и SSE-стримом (PR 4.5)."""
+"""Chat-роуты с памятью, эмоциями, контекст-агрегатором и SSE-стримом.
+
+PR autonomy fix:
+- `_maybe_extract_facts` теперь запускается **фоновым** таском, чтобы
+  не блокировать ответ пользователю на 5–10 секунд (LLM-вызов).
+- Убран лишний `await session.commit()` в `event_source` — `get_session`
+  Depends уже коммитит сама после завершения StreamingResponse.
+- Убран мёртвый артефакт `[:-0] if False else …`.
+"""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,8 +75,8 @@ def _ctx_messages(
     return msgs
 
 
-async def _maybe_extract_facts(user_id: str, history: list[dict]) -> None:
-    """Периодически достаёт факты из истории и кладёт их в долгосрочную память."""
+async def _extract_facts_bg(user_id: str, history: list[dict]) -> None:
+    """Фоновое извлечение фактов из истории. Не блокирует ответ."""
     if not history or len(history) % FACT_EXTRACT_EVERY != 0:
         return
     try:
@@ -86,9 +94,24 @@ async def _maybe_extract_facts(user_id: str, history: list[dict]) -> None:
                 for f in facts
             ]
         )
-        logger.info("📝 Extracted %d facts for user=%s", len(facts), user_id)
-    except Exception as exc:  # pragma: no cover - не валим основной поток
-        logger.warning("fact extraction failed: %s", exc)
+        logger.info("📝 Extracted %d facts (bg) for user=%s", len(facts), user_id)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("background fact extraction failed: %s", exc)
+
+
+async def _store_chat_memory(user_id: str, user_msg: str, assistant_msg: str) -> None:
+    """Фоновое сохранение пары сообщений в векторную память."""
+    try:
+        await default_memory().add(
+            [
+                MemoryRecord(id="", text=user_msg, user_id=user_id, metadata={"role": "user"}),
+                MemoryRecord(
+                    id="", text=assistant_msg, user_id=user_id, metadata={"role": "assistant"}
+                ),
+            ]
+        )
+    except Exception as exc:
+        logger.warning("background memory store failed: %s", exc)
 
 
 @router.get("/history", response_model=list[ChatMessageOut])
@@ -104,6 +127,7 @@ async def history(
 @router.post("/", response_model=ChatResponseOut)
 async def send(
     body: ChatRequest,
+    background: BackgroundTasks,
     user: AuthenticatedUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ChatResponseOut:
@@ -114,7 +138,7 @@ async def send(
     aggregator = ContextAggregator(session, emotion_service=emotion_service)
     full_ctx = await aggregator.get_full_context(user.user_id, body.message)
 
-    # Сохраняем эмоцию в историю
+    # Логируем эмоцию (синхронно — пишем в ту же сессию)
     if full_ctx.emotion:
         try:
             await EmotionRepository(session).add(
@@ -128,34 +152,23 @@ async def send(
         except Exception as exc:
             logger.warning("emotion log failed: %s", exc)
 
-    history_rows = full_ctx.history[:-0] if False else full_ctx.history[:-1] if full_ctx.history else []
+    # `aggregator.get_full_context` уже включает только-что добавленное
+    # сообщение пользователя в `history`. Срезаем последнее, чтобы не
+    # дублировать его при формировании промпта.
+    history_rows = full_ctx.history[:-1] if full_ctx.history else []
     messages = _ctx_messages(BASE_SYSTEM, full_ctx, history_rows, body.message)
+
     response = await default_router().chat(messages, profile=body.profile)  # type: ignore[arg-type]
     await convos.add(user.user_id, "assistant", response.text)
 
+    # Тяжёлые операции — в фон, чтобы ответ улетел немедленно
     if body.use_memory:
-        try:
-            await default_memory().add(
-                [
-                    MemoryRecord(
-                        id="",
-                        text=body.message,
-                        user_id=user.user_id,
-                        metadata={"role": "user"},
-                    ),
-                    MemoryRecord(
-                        id="",
-                        text=response.text,
-                        user_id=user.user_id,
-                        metadata={"role": "assistant"},
-                    ),
-                ]
-            )
-        except Exception:
-            pass
-
-    # Авто-извлечение фактов раз в FACT_EXTRACT_EVERY сообщений
-    await _maybe_extract_facts(user.user_id, full_ctx.history + [{"role": "user", "content": body.message}])
+        background.add_task(_store_chat_memory, user.user_id, body.message, response.text)
+    background.add_task(
+        _extract_facts_bg,
+        user.user_id,
+        full_ctx.history + [{"role": "user", "content": body.message}],
+    )
 
     return ChatResponseOut(
         reply=response.text,
@@ -169,6 +182,7 @@ async def send(
 @router.post("/stream")
 async def stream(
     body: ChatRequest,
+    background: BackgroundTasks,
     user: AuthenticatedUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
@@ -194,32 +208,44 @@ async def stream(
 
     history_rows = full_ctx.history[:-1] if full_ctx.history else []
     messages = _ctx_messages(BASE_SYSTEM, full_ctx, history_rows, body.message)
+    history_snapshot = list(full_ctx.history)
+    user_message = body.message
+    profile = body.profile
+    use_memory = body.use_memory
+    user_id = user.user_id
 
     async def event_source() -> AsyncIterator[bytes]:
         collected: list[str] = []
         try:
-            async for chunk in default_router().stream(messages, profile=body.profile):  # type: ignore[arg-type]
+            async for chunk in default_router().stream(messages, profile=profile):  # type: ignore[arg-type]
                 collected.append(chunk)
                 yield f"data: {chunk}\n\n".encode()
             yield b"event: done\ndata: end\n\n"
         finally:
             full = "".join(collected)
             if full:
-                await ConversationRepository(session).add(user.user_id, "assistant", full)
-                await session.commit()
-                if body.use_memory:
+                # Используем отдельный session_scope, чтобы НЕ зависеть от
+                # уже-возможно-закрытой Depends-сессии. Это важно: когда
+                # StreamingResponse завершается, FastAPI чистит зависимости.
+                from app.db import session_scope
+
+                try:
+                    async with session_scope() as s2:
+                        await ConversationRepository(s2).add(user_id, "assistant", full)
+                except Exception as exc:
+                    logger.warning("stream save failed: %s", exc)
+
+                if use_memory:
                     try:
-                        await default_memory().add(
-                            [
-                                MemoryRecord(id="", text=body.message, user_id=user.user_id),
-                                MemoryRecord(id="", text=full, user_id=user.user_id),
-                            ]
-                        )
+                        await _store_chat_memory(user_id, user_message, full)
                     except Exception:
                         pass
-                await _maybe_extract_facts(
-                    user.user_id,
-                    full_ctx.history + [{"role": "user", "content": body.message}],
-                )
+                try:
+                    await _extract_facts_bg(
+                        user_id,
+                        history_snapshot + [{"role": "user", "content": user_message}],
+                    )
+                except Exception:
+                    pass
 
     return StreamingResponse(event_source(), media_type="text/event-stream")

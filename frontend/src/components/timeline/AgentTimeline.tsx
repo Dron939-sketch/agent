@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Play, Workflow } from "lucide-react";
 import { openAgentSocket, type AgentStep } from "@/lib/api";
+import { useSession } from "@/store/session";
 
 type Props = { id?: string };
 
@@ -18,14 +19,21 @@ const KIND_COLOR: Record<string, string> = {
 };
 
 export function AgentTimeline({ id }: Props) {
+  const token = useSession((s) => s.token);
   const [task, setTask] = useState("");
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
   function run() {
     if (!task.trim() || running) return;
+    if (!token) {
+      window.dispatchEvent(new CustomEvent("freddy:open-auth"));
+      return;
+    }
     setSteps([]);
+    setError(null);
     setRunning(true);
     const ws = openAgentSocket(
       { task, mode: "pipeline", profile: "smart" },
@@ -36,9 +44,18 @@ export function AgentTimeline({ id }: Props) {
         if (evt.type === "done") {
           setRunning(false);
         }
+        if (evt.type === "error") {
+          setError(evt.message);
+          setRunning(false);
+        }
       },
       () => setRunning(false)
     );
+    if (!ws) {
+      setRunning(false);
+      setError("Не удалось открыть соединение");
+      return;
+    }
     socketRef.current = ws;
   }
 
@@ -49,14 +66,16 @@ export function AgentTimeline({ id }: Props) {
       <div className="mb-3 flex items-center gap-2 text-sm text-slate-300">
         <Workflow className="h-4 w-4 text-neon-cyan" />
         <span>Agent Timeline</span>
-        <span className="ml-auto text-xs text-slate-500">pipeline · WS live</span>
+        <span className="ml-auto text-xs text-slate-500">
+          {token ? "pipeline · WS live" : "guest"}
+        </span>
       </div>
 
       <div className="mb-3 flex gap-2">
         <input
           value={task}
           onChange={(e) => setTask(e.target.value)}
-          placeholder="Что должен сделать Фреди?"
+          placeholder={token ? "Что должен сделать Фреди?" : "Сначала войди →"}
           className="input"
         />
         <button
@@ -67,6 +86,12 @@ export function AgentTimeline({ id }: Props) {
           <Play className="h-4 w-4" />
         </button>
       </div>
+
+      {error && (
+        <div className="mb-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          {error}
+        </div>
+      )}
 
       <div className="scrollbar-thin flex-1 space-y-2 overflow-y-auto pr-2">
         <AnimatePresence initial={false}>
