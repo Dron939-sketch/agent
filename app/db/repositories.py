@@ -1,6 +1,6 @@
 """Async-репозитории, повторяющие API legacy-класса `Database` из main.py.
 
-Это позволяет постепенно мигрировать вызовы без переписывания всех роутеров.
+PR4 Фазы 2 добавляет `MemoryRepository`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Backup, Conversation, Log, Repository, Session, Task, User
+from .models import Backup, Conversation, Log, Memory, Repository, Session, Task, User
 
 
 # ============ Users ============
@@ -209,3 +209,45 @@ class RepoRepository:
             .order_by(Repository.created_at.desc())
         )
         return list(result.scalars().all())
+
+
+# ============ Memories (PR4 Фазы 2) ============
+
+class MemoryRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def add(
+        self,
+        user_id: str,
+        text: str,
+        embedding: list[float],
+        *,
+        kind: str = "message",
+        metadata: dict[str, Any] | None = None,
+    ) -> int:
+        memory = Memory(
+            user_id=user_id,
+            text=text,
+            embedding=json.dumps(embedding),
+            kind=kind,
+            extra_metadata=json.dumps(metadata or {}),
+        )
+        self.session.add(memory)
+        await self.session.flush()
+        return memory.id
+
+    async def list_for_user(self, user_id: str, limit: int = 1000) -> list[Memory]:
+        result = await self.session.execute(
+            select(Memory)
+            .where(Memory.user_id == user_id)
+            .order_by(Memory.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def delete_user(self, user_id: str) -> int:
+        result = await self.session.execute(
+            delete(Memory).where(Memory.user_id == user_id)
+        )
+        return result.rowcount or 0
