@@ -1,4 +1,4 @@
-"""Системные роуты: root landing, health, version, keepalive."""
+"""Системные роуты: root landing, health, version, keepalive, integrations."""
 
 from __future__ import annotations
 
@@ -94,8 +94,9 @@ li a:hover {{ background: rgba(168,85,247,.18); border-color: rgba(168,85,247,.4
     <li><a href="/docs">/docs <span class="pill">Swagger UI</span></a></li>
     <li><a href="/redoc">/redoc <span class="pill">ReDoc</span></a></li>
     <li><a href="/health">/health <span class="pill">healthcheck</span></a></li>
+    <li><a href="/ready">/ready <span class="pill">DB probe</span></a></li>
+    <li><a href="/integrations">/integrations <span class="pill">статус ключей</span></a></li>
     <li><a href="/version">/version <span class="pill">build info</span></a></li>
-    <li><a href="/keepalive">/keepalive <span class="pill">no-sleep ping</span></a></li>
     <li><a href="/api/auth/me">/api/auth/me <span class="pill">требует токен</span></a></li>
   </ul>
   <div class="foot">всемогущий мульти-агентный AI-помощник</div>
@@ -117,7 +118,6 @@ async def root() -> HTMLResponse:
 
 @router.get("/favicon.ico", include_in_schema=False)
 async def favicon() -> Response:
-    """Прозрачный 1×1 PNG."""
     transparent_png = (
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
         b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8"
@@ -151,6 +151,47 @@ async def ready() -> dict[str, object]:
 async def keepalive() -> dict[str, str]:
     """Лёгкий ping для удержания сервиса от засыпания на free-tier хостингах."""
     return {"status": "alive"}
+
+
+@router.get("/integrations")
+async def integrations() -> dict[str, object]:
+    """Статус всех опциональных интеграций (без раскрытия секретов).
+
+    Отдаёт `true` если соответствующая env-переменная задана и непустая.
+    Используется для быстрой диагностики "почему не работает голос/push".
+    """
+    return {
+        "llm": {
+            "deepseek": bool(Config.DEEPSEEK_API_KEY),
+            "anthropic": bool(Config.ANTHROPIC_API_KEY),
+            "openai": bool(Config.OPENAI_API_KEY),
+            "ollama": bool(Config.OLLAMA_BASE_URL),
+        },
+        "voice": {
+            "deepgram_stt": bool(Config.DEEPGRAM_API_KEY),
+            "yandex": bool(Config.YANDEX_API_KEY),
+        },
+        "weather": bool(Config.OPENWEATHER_API_KEY),
+        "search": bool(Config.TAVILY_API_KEY),
+        "github": bool(Config.GITHUB_TOKEN),
+        "push": {
+            "vapid_private": bool(Config.VAPID_PRIVATE_KEY),
+            "vapid_public": bool(Config.VAPID_PUBLIC_KEY),
+        },
+        "observability": {
+            "sentry": bool(Config.SENTRY_DSN),
+        },
+        "core": {
+            "secret_key_set": bool(
+                Config.SECRET_KEY and Config.SECRET_KEY != "change-me"
+            ),
+            "database": Config.DATABASE_URL.split("://")[0]
+            if Config.DATABASE_URL
+            else None,
+            "environment": Config.ENVIRONMENT,
+            "version": Config.APP_VERSION,
+        },
+    }
 
 
 @router.get("/version")
