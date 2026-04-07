@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { AgentTimeline } from "@/components/timeline/AgentTimeline";
+import { DashboardTiles } from "@/components/dashboard/DashboardTiles";
+import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
 
 const FreddyAvatar = dynamic(
   () => import("@/components/avatar/FreddyAvatar").then((m) => m.FreddyAvatar),
@@ -34,14 +36,14 @@ export default function HomePage() {
         <nav className="hidden gap-6 text-sm text-slate-400 md:flex">
           <a className="hover:text-white" href="#chat">Чат</a>
           <a className="hover:text-white" href="#agents">Агенты</a>
-          <a className="hover:text-white" href="#memory">Память</a>
+          <a className="hover:text-white" href="#dashboard">Дашборд</a>
           <kbd className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-slate-400">
             ⌘K
           </kbd>
         </nav>
       </header>
 
-      <section className="mx-auto grid max-w-7xl gap-6 px-6 pb-16 md:grid-cols-[1.1fr_1fr] lg:grid-cols-[1.2fr_1fr_0.9fr]">
+      <section className="mx-auto grid max-w-7xl gap-6 px-6 pb-10 md:grid-cols-[1.1fr_1fr] lg:grid-cols-[1.2fr_1fr_0.9fr]">
         <div className="glass relative aspect-square min-h-[320px] overflow-hidden md:aspect-auto md:min-h-[560px]">
           <div className="absolute inset-0 bg-aurora opacity-60" />
           <FreddyAvatar state={agentState} />
@@ -57,8 +59,12 @@ export default function HomePage() {
         <AgentTimeline id="agents" />
       </section>
 
+      <DashboardTiles id="dashboard" />
+
+      <VoiceRecorder />
+
       <footer className="px-8 pb-10 text-center text-xs text-slate-500">
-        Фаза 3 · WOW UI · Next.js 14 + R3F + Framer Motion
+        Фаза 3 · WOW UI · Next.js 14 + R3F + Framer Motion · PWA
       </footer>
     </main>
   );
