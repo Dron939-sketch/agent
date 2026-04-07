@@ -1,11 +1,13 @@
-"""Database layer (PR4 Фазы 2 — добавлены Memory + MemoryRepository)."""
+"""Database layer."""
 
 from .models import (
     Backup,
     Base,
     Conversation,
+    EmotionEvent,
     Log,
     Memory,
+    PushSubscription,
     Repository,
     Session,
     Task,
@@ -14,6 +16,7 @@ from .models import (
 from .repositories import (
     BackupRepository,
     ConversationRepository,
+    EmotionRepository,
     LogRepository,
     MemoryRepository,
     RepoRepository,
@@ -33,6 +36,8 @@ __all__ = [
     "Backup",
     "Repository",
     "Memory",
+    "PushSubscription",
+    "EmotionEvent",
     "UserRepository",
     "SessionRepository",
     "ConversationRepository",
@@ -41,6 +46,7 @@ __all__ = [
     "BackupRepository",
     "RepoRepository",
     "MemoryRepository",
+    "EmotionRepository",
     "get_engine",
     "get_sessionmaker",
     "session_scope",

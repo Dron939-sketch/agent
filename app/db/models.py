@@ -1,7 +1,7 @@
 """SQLAlchemy 2.0 декларативные модели Фреди.
 
 Все таблицы используют префикс `fr_*`, чтобы новый стек мог сосуществовать
-с легаси-схемой из main.py (где, например, `users.user_id` был bigint).
+с легаси-схемой из main.py.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import ForeignKey, Integer, String, Text, func
+from sqlalchemy import Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -137,3 +137,21 @@ class PushSubscription(Base):
     endpoint: Mapped[str] = mapped_column(Text, index=True)
     payload: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())
+
+
+class EmotionEvent(Base):
+    """Эмоциональная история пользователя (PR 4.5)."""
+
+    __tablename__ = "fr_emotion_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    primary: Mapped[str] = mapped_column(String)
+    intensity: Mapped[int] = mapped_column(Integer, default=5)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    tone: Mapped[Optional[str]] = mapped_column(String)
+    needs_support: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String, default="text")  # text/audio/both
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), index=True
+    )

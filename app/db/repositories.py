@@ -1,6 +1,6 @@
-"""Async-репозитории, повторяющие API legacy-класса `Database` из main.py.
+"""Async-репозитории для Фреди.
 
-PR4 Фазы 2 добавляет `MemoryRepository`.
+PR 4.5 добавляет EmotionRepository.
 """
 
 from __future__ import annotations
@@ -14,7 +14,17 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Backup, Conversation, Log, Memory, Repository, Session, Task, User
+from .models import (
+    Backup,
+    Conversation,
+    EmotionEvent,
+    Log,
+    Memory,
+    Repository,
+    Session,
+    Task,
+    User,
+)
 
 
 # ============ Users ============
@@ -211,7 +221,7 @@ class RepoRepository:
         return list(result.scalars().all())
 
 
-# ============ Memories (PR4 Фазы 2) ============
+# ============ Memories ============
 
 class MemoryRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -251,3 +261,55 @@ class MemoryRepository:
             delete(Memory).where(Memory.user_id == user_id)
         )
         return result.rowcount or 0
+
+
+# ============ Emotions (PR 4.5) ============
+
+class EmotionRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def add(
+        self,
+        user_id: str,
+        primary: str,
+        intensity: int,
+        confidence: float,
+        *,
+        tone: str | None = None,
+        needs_support: bool = False,
+        source: str = "text",
+    ) -> int:
+        event = EmotionEvent(
+            user_id=user_id,
+            primary=primary,
+            intensity=intensity,
+            confidence=confidence,
+            tone=tone,
+            needs_support=1 if needs_support else 0,
+            source=source,
+        )
+        self.session.add(event)
+        await self.session.flush()
+        return event.id
+
+    async def recent(self, user_id: str, limit: int = 10) -> list[EmotionEvent]:
+        result = await self.session.execute(
+            select(EmotionEvent)
+            .where(EmotionEvent.user_id == user_id)
+            .order_by(EmotionEvent.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def trend(self, user_id: str, limit: int = 5) -> dict[str, Any]:
+        events = await self.recent(user_id, limit=limit)
+        if not events:
+            return {"trend": "no_data", "stability": 1.0}
+        emotions = [e.primary for e in events]
+        unique = set(emotions)
+        if len(unique) == 1:
+            return {"trend": "stable", "stability": 0.9, "emotion": emotions[0]}
+        if len(unique) == 2:
+            return {"trend": "shifting", "stability": 0.6, "emotions": list(unique)}
+        return {"trend": "volatile", "stability": 0.3, "emotions": list(unique)}
