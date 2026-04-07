@@ -51,9 +51,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # CORS: allow_credentials=True не работает с allow_origins=["*"],
+    # поэтому используем regex, разрешающий любые onrender.com и localhost.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origin_regex=r"https?://(.*\.onrender\.com|localhost(:\d+)?|127\.0\.0\.1(:\d+)?)",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
