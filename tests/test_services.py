@@ -12,13 +12,18 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 
 from app.db import dispose_db, init_db  # noqa: E402
 from app.services import DeepSeekClient, TaskScheduler  # noqa: E402
+from app.services.llm import LLMError  # noqa: E402
 
 
 @pytest.mark.asyncio
-async def test_deepseek_without_key_returns_fallback() -> None:
+async def test_deepseek_without_key_raises_llm_error() -> None:
+    """Без API ключа клиент должен поднимать LLMError, а не молча возвращать строку.
+
+    Это даёт LLMRouter возможность откатиться на следующего провайдера.
+    """
     client = DeepSeekClient(api_key="")
-    out = await client.chat([{"role": "user", "content": "ping"}])
-    assert "недоступен" in out.lower() or "ошибка" in out.lower()
+    with pytest.raises(LLMError):
+        await client.chat([])
 
 
 @pytest.mark.asyncio

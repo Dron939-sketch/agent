@@ -1,7 +1,4 @@
-"""Async-репозитории для Фреди.
-
-PR 4.5 добавляет EmotionRepository.
-"""
+"""Async-репозитории для Фреди."""
 
 from __future__ import annotations
 
@@ -10,7 +7,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,13 +31,21 @@ class UserRepository:
         self.session = session
 
     async def create(self, user_id: str, username: str, email: str, password_hash: str) -> bool:
-        user = User(user_id=user_id, username=username, email=email, password_hash=password_hash)
-        self.session.add(user)
+        """Создаёт пользователя в **savepoint**, чтобы IntegrityError на
+        дубликате не откатывал предыдущие успешные операции в той же сессии.
+        """
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(
+                    User(
+                        user_id=user_id,
+                        username=username,
+                        email=email,
+                        password_hash=password_hash,
+                    )
+                )
             return True
         except IntegrityError:
-            await self.session.rollback()
             return False
 
     async def get(self, user_id: str) -> Optional[User]:
@@ -107,10 +112,12 @@ class ConversationRepository:
         await self.session.flush()
 
     async def history(self, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        # Сортировка по id DESC даёт стабильный порядок даже когда несколько
+        # сообщений вставлены с одинаковым created_at (бывает в SQLite).
         result = await self.session.execute(
             select(Conversation)
             .where(Conversation.user_id == user_id)
-            .order_by(Conversation.created_at.desc())
+            .order_by(Conversation.id.desc())
             .limit(limit)
         )
         rows = result.scalars().all()
@@ -251,16 +258,22 @@ class MemoryRepository:
         result = await self.session.execute(
             select(Memory)
             .where(Memory.user_id == user_id)
-            .order_by(Memory.created_at.desc())
+            .order_by(Memory.id.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
 
-    async def delete_user(self, user_id: str) -> int:
+    async def count_for_user(self, user_id: str) -> int:
         result = await self.session.execute(
-            delete(Memory).where(Memory.user_id == user_id)
+            select(func.count()).select_from(Memory).where(Memory.user_id == user_id)
         )
-        return result.rowcount or 0
+        return int(result.scalar() or 0)
+
+    async def delete_user(self, user_id: str) -> int:
+        # rowcount aiosqlite ненадёжен — считаем заранее
+        count = await self.count_for_user(user_id)
+        await self.session.execute(delete(Memory).where(Memory.user_id == user_id))
+        return count
 
 
 # ============ Emotions (PR 4.5) ============
@@ -297,7 +310,7 @@ class EmotionRepository:
         result = await self.session.execute(
             select(EmotionEvent)
             .where(EmotionEvent.user_id == user_id)
-            .order_by(EmotionEvent.created_at.desc())
+            .order_by(EmotionEvent.id.desc())
             .limit(limit)
         )
         return list(result.scalars().all())

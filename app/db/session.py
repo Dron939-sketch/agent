@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import StaticPool
 
 from app.core.config import Config
 
@@ -20,12 +21,22 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+def _is_memory_sqlite(url: str) -> bool:
+    return ":memory:" in url
+
+
 def get_engine() -> AsyncEngine:
     """Ленивый singleton движка."""
     global _engine, _sessionmaker
     if _engine is None:
         Config.ensure_dirs()
-        _engine = create_async_engine(Config.DATABASE_URL, future=True)
+        kwargs: dict = {"future": True}
+        # Для in-memory SQLite КРИТИЧНО использовать StaticPool, иначе каждое
+        # новое соединение получает свою БД и таблицы init_db() пропадают.
+        if _is_memory_sqlite(Config.DATABASE_URL):
+            kwargs["poolclass"] = StaticPool
+            kwargs["connect_args"] = {"check_same_thread": False}
+        _engine = create_async_engine(Config.DATABASE_URL, **kwargs)
         _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
     return _engine
 

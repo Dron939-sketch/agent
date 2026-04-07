@@ -26,6 +26,8 @@ EMOTION_KEYWORDS: dict[str, tuple[str, ...]] = {
 
 NEEDS_SUPPORT = {"sadness", "fear", "anger"}
 
+VALID_EMOTIONS = set(EMOTION_KEYWORDS.keys()) | {"neutral"}
+
 TONE_BY_EMOTION: dict[str, str] = {
     "joy": "energetic",
     "sadness": "warm",
@@ -114,10 +116,15 @@ class EmotionService:
         ]
         try:
             resp = await self._router.chat(messages, profile="fast", temperature=0.2, max_tokens=120)  # type: ignore[arg-type]
-            data = json.loads(_extract_json(resp.text))
-            primary = str(data.get("primary", "neutral"))
+            extracted = _extract_json(resp.text)
+            data = json.loads(extracted) if extracted else {}
+            primary = str(data.get("primary") or "")
+            # Если LLM вернул мусор/пустоту/неизвестную эмоцию — fallback на regex
+            if primary not in VALID_EMOTIONS:
+                logger.debug("EmotionService deep returned invalid primary, falling back")
+                return self.detect_from_text(text)
             intensity = int(data.get("intensity", 5))
-            tone = str(data.get("tone", TONE_BY_EMOTION.get(primary, "warm")))
+            tone = str(data.get("tone") or TONE_BY_EMOTION.get(primary, "warm"))
             return EmotionResult(
                 primary=primary,
                 confidence=min(1.0, intensity / 10),
@@ -135,5 +142,5 @@ def _extract_json(text: str) -> str:
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
-        return "{}"
+        return ""
     return text[start : end + 1]

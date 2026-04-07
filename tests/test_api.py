@@ -24,11 +24,17 @@ async def test_health_and_auth_flow() -> None:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             r = await client.get("/health")
             assert r.status_code == 200
-            assert r.json() == {"status": "ok"}
+            data = r.json()
+            assert data["status"] == "ok"
+            assert "uptime_seconds" in data
 
             r = await client.get("/version")
             assert r.status_code == 200
             assert "version" in r.json()
+
+            r = await client.get("/keepalive")
+            assert r.status_code == 200
+            assert r.json() == {"status": "alive"}
 
             r = await client.post(
                 "/api/auth/register",
