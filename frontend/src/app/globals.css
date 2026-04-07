@@ -4,12 +4,23 @@
 
 :root {
   color-scheme: dark;
+  --safe-bottom: env(safe-area-inset-bottom);
+  --safe-top: env(safe-area-inset-top);
+  --safe-left: env(safe-area-inset-left);
+  --safe-right: env(safe-area-inset-right);
 }
 
 html,
 body {
   @apply bg-bg text-slate-100 antialiased;
+  /* Используем dynamic viewport units для корректной высоты в iOS Safari
+     (обычный 100vh не учитывает динамический URL-bar). */
   min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  /* Запрещаем pull-to-refresh на мобилках, чтобы скролл чата не дёргался */
+  overscroll-behavior-y: none;
 }
 
 body {
@@ -19,6 +30,24 @@ body {
     radial-gradient(ellipse at 60% 85%, rgba(244, 114, 182, 0.12), transparent 55%),
     linear-gradient(180deg, #05060f 0%, #070919 100%);
   background-attachment: fixed;
+  /* iOS: добавляем safe-area отступы, чтобы UI не залезал под notch */
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/* На iPhone Safari зумит инпут с font-size < 16px при фокусе.
+   Принудительно ставим 16px для всех текстовых полей. */
+input,
+textarea,
+select {
+  font-size: 16px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 @layer components {
@@ -38,11 +67,18 @@ body {
     @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium
            bg-gradient-to-r from-neon-cyan/90 via-neon-violet/90 to-neon-pink/90
            text-white shadow-neon transition hover:brightness-110 active:scale-[0.98];
+    touch-action: manipulation;
   }
   .input {
     @apply w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3
            text-slate-100 placeholder:text-slate-500 focus:outline-none
            focus:border-neon-violet/60 focus:ring-2 focus:ring-neon-violet/30;
+  }
+  .safe-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  .safe-top {
+    padding-top: max(1rem, env(safe-area-inset-top));
   }
 }
 
@@ -52,4 +88,15 @@ body {
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 3px;
+}
+
+/* Reduced motion: уменьшаем анимации для людей с предпочтением */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
