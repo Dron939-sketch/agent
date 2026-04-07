@@ -1,12 +1,13 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-aiohttp==3.9.1
+aiohttp==3.10.10
 aiofiles==23.2.1
 python-multipart==0.0.6
 beautifulsoup4==4.12.2
 # lxml 5.3+ поставляется с manylinux wheels для py3.11
 lxml==5.3.0
-duckduckgo-search==6.3.2
+# 7.x имеет wheels под Linux/py3.11 (без сборки primp из исходников)
+duckduckgo-search==7.2.1
 
 # === Phase 1: async DB stack ===
 SQLAlchemy[asyncio]==2.0.34
