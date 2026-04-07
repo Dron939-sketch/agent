@@ -1,0 +1,84 @@
+# Render Blueprint для Фреди.
+# https://render.com/docs/blueprint-spec
+#
+# Применить:
+#   1. В Render Dashboard → New → Blueprint → выбрать этот репо.
+#   2. Render распарсит файл и предложит создать сервисы.
+#   3. После создания задай секретные env (помечены `sync: false`)
+#      в Settings → Environment.
+#
+# Backend `agent` уже создан вручную — этот блок описан для воспроизводимости.
+
+services:
+  # ============ Backend API ============
+  - type: web
+    name: agent
+    runtime: docker
+    plan: free
+    branch: claude/analyze-agent-repo-z8XBp
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PORT
+        value: "10000"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: YANDEX_API_KEY
+        sync: false
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: mailto:admin@freddy.local
+      - key: VAD_MODE
+        value: webrtc
+      - key: SENTRY_DSN
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agent-db
+          property: connectionString
+
+  # ============ Frontend (Next.js 14) ============
+  - type: web
+    name: agent-frontend
+    runtime: docker
+    plan: free
+    branch: claude/analyze-agent-repo-z8XBp
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://agent-ynlg.onrender.com
+      - key: NEXT_PUBLIC_VAPID_PUBLIC_KEY
+        sync: false
+      - key: NEXT_PUBLIC_VAD_MODE
+        value: webrtc
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+
+databases:
+  - name: agent-db
+    plan: free
+    databaseName: freddy
+    user: freddy
