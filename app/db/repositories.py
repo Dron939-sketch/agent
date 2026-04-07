@@ -112,10 +112,12 @@ class ConversationRepository:
         await self.session.flush()
 
     async def history(self, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        # Сортировка по id DESC даёт стабильный порядок даже когда несколько
+        # сообщений вставлены с одинаковым created_at (бывает в SQLite).
         result = await self.session.execute(
             select(Conversation)
             .where(Conversation.user_id == user_id)
-            .order_by(Conversation.created_at.desc())
+            .order_by(Conversation.id.desc())
             .limit(limit)
         )
         rows = result.scalars().all()
@@ -256,7 +258,7 @@ class MemoryRepository:
         result = await self.session.execute(
             select(Memory)
             .where(Memory.user_id == user_id)
-            .order_by(Memory.created_at.desc())
+            .order_by(Memory.id.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
@@ -308,7 +310,7 @@ class EmotionRepository:
         result = await self.session.execute(
             select(EmotionEvent)
             .where(EmotionEvent.user_id == user_id)
-            .order_by(EmotionEvent.created_at.desc())
+            .order_by(EmotionEvent.id.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
