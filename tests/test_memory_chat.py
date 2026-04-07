@@ -44,7 +44,7 @@ async def test_sql_vector_store_persists_and_searches() -> None:
         assert all(h.user_id == "bob" for h in bob)
 
         removed = await store2.delete_user("alice")
-        assert removed >= 3
+        assert removed == 2  # ровно 2 alice-записи в датасете
         assert await store2.search("python", user_id="alice") == []
     finally:
         await dispose_db()
@@ -56,7 +56,6 @@ async def test_chat_integration_stores_memory_after_message(monkeypatch) -> None
     await init_db()
     reset_default_memory()
     try:
-        # подмена LLM-роутера: возвращает фиктивный ответ без сети
         from app.services import llm as llm_pkg
         from app.services.llm import ChatResponse, LLMRouter, Usage
 
@@ -96,7 +95,11 @@ async def test_chat_integration_stores_memory_after_message(monkeypatch) -> None
             assert r.status_code == 200, r.text
             assert r.json()["reply"] == "OK, понял"
 
-            # второе сообщение должно увидеть recall
+            # background tasks выполняются после ответа — даём им доделать
+            import asyncio
+
+            await asyncio.sleep(0.3)
+
             r2 = await client.post(
                 "/api/chat/",
                 headers=headers,
