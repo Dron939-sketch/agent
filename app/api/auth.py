@@ -1,4 +1,11 @@
-"""Auth-роуты: register, login, refresh, me."""
+"""Auth-роуты: register, login, refresh, me.
+
+PR autonomy:
+- email теперь опциональный (мы не отправляем письма) — снимает 422 на
+  кривом email при регистрации.
+- password min_length=6 (8 был слишком строг для UX).
+- username min_length=2 — чтобы короткие никнеймы тоже работали.
+"""
 
 from __future__ import annotations
 
@@ -14,9 +21,9 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class RegisterRequest(BaseModel):
-    username: str = Field(min_length=3, max_length=64)
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    username: str = Field(min_length=2, max_length=64)
+    email: EmailStr | None = None
+    password: str = Field(min_length=6, max_length=128)
 
 
 class LoginRequest(BaseModel):
@@ -44,7 +51,7 @@ async def register(
     body: RegisterRequest, session: AsyncSession = Depends(get_session)
 ) -> MeResponse:
     auth = AuthService(session)
-    user_id = await auth.register(body.username, body.email, body.password)
+    user_id = await auth.register(body.username, body.email or "", body.password)
     if user_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "username or email already taken")
     return MeResponse(user_id=user_id, username=body.username)
