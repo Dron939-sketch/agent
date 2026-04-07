@@ -1,19 +1,89 @@
-version: '3.8'
+version: "3.9"
+
+# Полный стек Фреди — `docker compose up -d --build`.
+# Frontend: http://localhost:3000   API: http://localhost:8000   Caddy: http://localhost
+#
+# Минимум для запуска: задать DEEPSEEK_API_KEY (или ANTHROPIC_API_KEY/OPENAI_API_KEY)
+# и опц. DEEPGRAM_API_KEY / YANDEX_API_KEY / VAPID_PRIVATE_KEY (см. .env.example).
 
 services:
-  assistant:
+  api:
     build: .
-    ports:
-      - "8000:8000"
+    image: freddy-agent:dev
+    env_file: .env
     environment:
-      - DATABASE_URL=sqlite:///assistant.db
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - YANDEX_API_KEY=${YANDEX_API_KEY}
-      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - GITHUB_REPO=${GITHUB_REPO}
+      - DATABASE_URL=postgresql+asyncpg://freddy:freddy@postgres:5432/freddy
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
     volumes:
       - ./data:/app/data
       - ./backups:/app/backups
       - ./logs:/app/logs
+    ports:
+      - "8000:8000"
     restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    image: freddy-frontend:dev
+    environment:
+      - NEXT_PUBLIC_API_URL=http://api:8000
+      - NEXT_PUBLIC_VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - NODE_ENV=production
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: freddy
+      POSTGRES_PASSWORD: freddy
+      POSTGRES_DB: freddy
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - qdrant-data:/qdrant/storage
+    ports:
+      - "6333:6333"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - api
+      - frontend
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  redis-data:
+  qdrant-data:
+  caddy-data:
+  caddy-config:

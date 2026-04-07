@@ -1,0 +1,57 @@
+site_name: Фреди — документация
+site_description: Всемогущий AI-помощник с мульти-агентами и WOW-интерфейсом.
+site_url: https://dron939-sketch.github.io/agent
+repo_url: https://github.com/dron939-sketch/agent
+repo_name: dron939-sketch/agent
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: ru
+  palette:
+    - scheme: slate
+      primary: deep purple
+      accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Тёмная тема
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.emoji
+
+nav:
+  - Главная: index.md
+  - Архитектура: architecture.md
+  - Запуск: quickstart.md
+  - API: api.md
+  - Инструменты:
+      - Tool Registry: tools.md
+      - Plugin SDK: plugins.md
+  - Память: memory.md
+  - Мульти-агент: orchestrator.md
+  - Голос и Push: voice-push.md
+  - Roadmap: ../ROADMAP.md

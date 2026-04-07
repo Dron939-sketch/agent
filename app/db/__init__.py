@@ -1,15 +1,11 @@
-"""Database layer.
-
-В Фазе 1 здесь реализован async SQLAlchemy 2.0 поверх той же SQLite-схемы,
-которой пользуется legacy `Database` из main.py. Это позволит постепенно
-переключить вызовы без миграции данных.
-"""
+"""Database layer (PR4 Фазы 2 — добавлены Memory + MemoryRepository)."""
 
 from .models import (
     Backup,
     Base,
     Conversation,
     Log,
+    Memory,
     Repository,
     Session,
     Task,
@@ -19,6 +15,7 @@ from .repositories import (
     BackupRepository,
     ConversationRepository,
     LogRepository,
+    MemoryRepository,
     RepoRepository,
     SessionRepository,
     TaskRepository,
@@ -35,6 +32,7 @@ __all__ = [
     "Log",
     "Backup",
     "Repository",
+    "Memory",
     "UserRepository",
     "SessionRepository",
     "ConversationRepository",
@@ -42,6 +40,7 @@ __all__ = [
     "LogRepository",
     "BackupRepository",
     "RepoRepository",
+    "MemoryRepository",
     "get_engine",
     "get_sessionmaker",
     "session_scope",
