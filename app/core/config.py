@@ -12,6 +12,22 @@ from functools import lru_cache
 from pathlib import Path
 
 
+def _normalize_database_url(raw: str) -> str:
+    """Нормализует DATABASE_URL для async SQLAlchemy.
+
+    Render/Heroku отдают `postgres://` — устаревшая схема, SQLAlchemy
+    отказывается её использовать. Переводим в `postgresql+asyncpg://`.
+    Для `postgresql://` без драйвера также подставляем `+asyncpg`.
+    """
+    if not raw:
+        return raw
+    if raw.startswith("postgres://"):
+        return "postgresql+asyncpg://" + raw[len("postgres://") :]
+    if raw.startswith("postgresql://") and "+" not in raw.split("://", 1)[0]:
+        return "postgresql+asyncpg://" + raw[len("postgresql://") :]
+    return raw
+
+
 class Config:
     """Глобальная конфигурация Фреди."""
 
@@ -24,7 +40,6 @@ class Config:
     # === Voice / STT провайдеры ===
     YANDEX_API_KEY: str = os.environ.get("YANDEX_API_KEY", "")
     DEEPGRAM_API_KEY: str = os.environ.get("DEEPGRAM_API_KEY", "")
-    # silero | webrtc | none — режим Voice Activity Detection на клиенте
     VAD_MODE: str = os.environ.get("VAD_MODE", "webrtc")
 
     # === Web Push (VAPID) ===
@@ -60,8 +75,8 @@ class Config:
     DATABASE_PATH: Path = DATA_DIR / "assistant.db"
 
     # === Хранилища (целевые) ===
-    DATABASE_URL: str = os.environ.get(
-        "DATABASE_URL", f"sqlite+aiosqlite:///{DATABASE_PATH}"
+    DATABASE_URL: str = _normalize_database_url(
+        os.environ.get("DATABASE_URL", f"sqlite+aiosqlite:///{DATABASE_PATH}")
     )
     REDIS_URL: str = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
     QDRANT_URL: str = os.environ.get("QDRANT_URL", "http://localhost:6333")
