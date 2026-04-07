@@ -1,17 +1,10 @@
-/* Фреди service worker — offline shell + web push.
- * Стратегии:
- *  - precache критичных ассетов на install
- *  - network-first для /api/* (чтобы свежие ответы всегда)
- *  - cache-first для статики (_next/static, шрифты, иконки)
- *  - offline fallback на "/" для навигаций
- *  - push: показ уведомления + клик возвращает в приложение
- */
+/* Фреди service worker — offline shell + web push. */
 
-const VERSION = "freddy-v2";
+const VERSION = "freddy-v3";
 const STATIC_CACHE = `${VERSION}-static`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
-const PRECACHE_URLS = ["/", "/manifest.webmanifest"];
+const PRECACHE_URLS = ["/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -96,8 +89,8 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: data.icon || "/icon-192.png",
-      badge: "/icon-192.png",
+      icon: data.icon || "/icon.svg",
+      badge: "/icon.svg",
       data: { url: data.url || "/" }
     })
   );
