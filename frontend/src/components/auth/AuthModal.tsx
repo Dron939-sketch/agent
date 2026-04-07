@@ -10,6 +10,23 @@ type Mode = "login" | "register";
 
 const API = resolveApiUrl();
 
+type ValidationItem = { loc?: (string | number)[]; msg?: string };
+
+function formatError(status: number, payload: unknown): string {
+  if (typeof payload === "string") return `${status}: ${payload.slice(0, 200)}`;
+  const obj = payload as { detail?: unknown };
+  const detail = obj?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = (detail as ValidationItem[]).map((item) => {
+      const field = item.loc?.filter((p) => p !== "body").join(".") || "поле";
+      return `${field}: ${item.msg || "невалидно"}`;
+    });
+    return parts.join("; ");
+  }
+  return `Ошибка ${status}`;
+}
+
 async function apiPost(path: string, body: unknown) {
   const res = await fetch(`${API}${path}`, {
     method: "POST",
@@ -17,14 +34,13 @@ async function apiPost(path: string, body: unknown) {
     body: JSON.stringify(body)
   });
   if (!res.ok) {
-    let detail = "";
+    let payload: unknown = await res.text();
     try {
-      const data = await res.json();
-      detail = data.detail || JSON.stringify(data);
+      payload = JSON.parse(payload as string);
     } catch {
-      detail = await res.text();
+      /* keep as text */
     }
-    throw new Error(`${res.status}: ${detail.slice(0, 200)}`);
+    throw new Error(formatError(res.status, payload));
   }
   return res.json();
 }
@@ -46,19 +62,34 @@ export function AuthModal() {
     return () => window.removeEventListener("freddy:open-auth", onOpen as EventListener);
   }, []);
 
-  async function submit() {
+  async function submit(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (busy) return;
+    if (!username.trim() || !password.trim()) {
+      setError("Имя пользователя и пароль обязательны");
+      return;
+    }
+    if (password.length < 6) {
+      setError("Пароль минимум 6 символов");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       if (mode === "register") {
-        await apiPost("/api/auth/register", { username, email, password });
+        const payload: Record<string, string> = {
+          username: username.trim(),
+          password
+        };
+        if (email.trim()) payload.email = email.trim();
+        await apiPost("/api/auth/register", payload);
       }
       const tokens = (await apiPost("/api/auth/login", {
-        username,
+        username: username.trim(),
         password
       })) as { access_token: string };
       localStorage.setItem("freddy_token", tokens.access_token);
-      setAuth(tokens.access_token, username);
+      setAuth(tokens.access_token, username.trim());
       setOpen(false);
       setPassword("");
     } catch (err) {
@@ -87,6 +118,7 @@ export function AuthModal() {
             onClick={(e) => e.stopPropagation()}
           >
             <button
+              type="button"
               className="absolute right-3 top-3 text-slate-400 hover:text-white"
               onClick={() => setOpen(false)}
               aria-label="Закрыть"
@@ -110,40 +142,54 @@ export function AuthModal() {
               {(["login", "register"] as Mode[]).map((m) => (
                 <button
                   key={m}
+                  type="button"
                   className={`rounded-lg px-3 py-2 transition ${
                     mode === m
                       ? "bg-gradient-to-r from-neon-violet/70 to-neon-pink/70 text-white"
                       : "text-slate-400 hover:text-white"
                   }`}
-                  onClick={() => setMode(m)}
+                  onClick={() => {
+                    setMode(m);
+                    setError(null);
+                  }}
                 >
                   {m === "login" ? "Вход" : "Регистрация"}
                 </button>
               ))}
             </div>
 
-            <div className="space-y-3">
+            <form onSubmit={submit} className="space-y-3" autoComplete="on">
               <input
                 className="input"
                 placeholder="Имя пользователя"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                name="username"
+                required
+                minLength={2}
               />
               {mode === "register" && (
                 <input
                   className="input"
-                  placeholder="Email"
+                  placeholder="Email (необязательно)"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  name="email"
                 />
               )}
               <input
                 className="input"
-                placeholder="Пароль"
+                placeholder="Пароль (минимум 6)"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                name="password"
+                required
+                minLength={6}
               />
               {error && (
                 <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
@@ -151,8 +197,8 @@ export function AuthModal() {
                 </div>
               )}
               <button
+                type="submit"
                 className="btn-primary w-full py-3"
-                onClick={submit}
                 disabled={busy || !username || !password}
               >
                 {mode === "login" ? (
@@ -165,7 +211,7 @@ export function AuthModal() {
                   </>
                 )}
               </button>
-            </div>
+            </form>
           </motion.div>
         </motion.div>
       )}
