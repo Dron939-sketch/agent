@@ -2,7 +2,8 @@
 
 Схема воспроизводит существующую SQLite-БД из main.py, чтобы можно было
 работать поверх старой `data/assistant.db` без потери данных.
-Фаза 2 PR4 добавляет таблицу `memories` для векторной памяти.
+Фаза 2 PR4 добавляет таблицу `memories`.
+Фаза 4 добавляет `push_subscriptions`.
 """
 
 from __future__ import annotations
@@ -118,3 +119,15 @@ class Memory(Base):
     kind: Mapped[str] = mapped_column(String, default="message")  # message / summary / fact
     extra_metadata: Mapped[Optional[str]] = mapped_column("metadata", Text)
     created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp(), index=True)
+
+
+class PushSubscription(Base):
+    """Web Push subscription (по одному на endpoint)."""
+
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    endpoint: Mapped[str] = mapped_column(Text, index=True)
+    payload: Mapped[str] = mapped_column(Text)  # JSON {endpoint, keys}
+    created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())
