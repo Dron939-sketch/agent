@@ -1,12 +1,13 @@
-/* Фреди service worker — базовый offline shell.
+/* Фреди service worker — offline shell + web push.
  * Стратегии:
  *  - precache критичных ассетов на install
  *  - network-first для /api/* (чтобы свежие ответы всегда)
  *  - cache-first для статики (_next/static, шрифты, иконки)
  *  - offline fallback на "/" для навигаций
+ *  - push: показ уведомления + клик возвращает в приложение
  */
 
-const VERSION = "freddy-v1";
+const VERSION = "freddy-v2";
 const STATIC_CACHE = `${VERSION}-static`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
@@ -51,7 +52,6 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
 
-  // API — network-first, с fallback на кеш если офлайн
   if (isApi(url)) {
     event.respondWith(
       fetch(request)
@@ -65,7 +65,6 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Статика — cache-first
   if (isStaticAsset(url)) {
     event.respondWith(
       caches.match(request).then(
@@ -81,10 +80,37 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Навигации — network-first, fallback на precached "/"
   if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request).catch(() => caches.match("/"))
-    );
+    event.respondWith(fetch(request).catch(() => caches.match("/")));
   }
+});
+
+// === Web Push ===
+self.addEventListener("push", (event) => {
+  let data = { title: "Фреди", body: "Новое уведомление" };
+  try {
+    if (event.data) data = { ...data, ...event.data.json() };
+  } catch (_e) {
+    /* not JSON */
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: data.icon || "/icon-192.png",
+      badge: "/icon-192.png",
+      data: { url: data.url || "/" }
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      const open = wins.find((w) => w.url.includes(target));
+      if (open) return open.focus();
+      return clients.openWindow(target);
+    })
+  );
 });
