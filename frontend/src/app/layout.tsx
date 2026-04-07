@@ -12,7 +12,10 @@ export const metadata: Metadata = {
   description:
     "Персональный мульти-агентный AI с живым 3D-аватаром, памятью и инструментами.",
   manifest: "/manifest.webmanifest",
-  icons: { icon: "/favicon.ico" },
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icon.svg" }]
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
