@@ -16,9 +16,12 @@ from app.plugins import load_plugins
 
 from . import agents as agents_router
 from . import auth as auth_router
+from . import brief as brief_router
 from . import chat as chat_router
+from . import feedback as feedback_router
 from . import push as push_router
 from . import system as system_router
+from . import vision as vision_router
 from . import voice as voice_router
 
 logger = get_logger(__name__)
@@ -58,8 +61,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS: regex для *.onrender.com + localhost. allow_credentials=True
-    # требует явных origins, поэтому wildcard "*" использовать нельзя.
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"https?://(.*\.onrender\.com|localhost(:\d+)?|127\.0\.0\.1(:\d+)?)",
@@ -74,6 +75,9 @@ def create_app() -> FastAPI:
     app.include_router(agents_router.router)
     app.include_router(voice_router.router)
     app.include_router(push_router.router)
+    app.include_router(vision_router.router)
+    app.include_router(feedback_router.router)
+    app.include_router(brief_router.router)
 
     return app
 
