@@ -1,4 +1,4 @@
-"""Chat-роуты с памятью, эмоциями, контекст-агрегатором и SSE-стримом."""
+"""Chat-роуты с памятью, эмоциями, контекст-агрегатором, KB и SSE-стримом."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from app.db import ConversationRepository, EmotionRepository
 from app.services import ChatMessage, default_router
 from app.services.context import ContextAggregator
 from app.services.emotion import EmotionService
+from app.services.knowledge import freddy_persona
 from app.services.memory import MemoryRecord, default_memory
 from app.services.memory.extractor import extract_facts
 
@@ -25,11 +26,17 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-BASE_SYSTEM = (
-    "Ты Фреди, дружелюбный и всемогущий AI-помощник. Отвечай по-русски, "
-    "обращайся на «ты», будь полезным и эмпатичным. "
-    "Учитывай эмоциональное состояние и память пользователя."
-)
+
+def _base_system() -> str:
+    """Системный промпт = персона из KB + fallback."""
+    persona = freddy_persona()
+    if persona:
+        return persona
+    return (
+        "Ты Фреди, дружелюбный и всемогущий AI-помощник. Отвечай по-русски, "
+        "обращайся на «ты», будь полезным и эмпатичным."
+    )
+
 
 # Каждые N сообщений запускаем авто-извлечение фактов
 FACT_EXTRACT_EVERY = 6
@@ -143,7 +150,7 @@ async def send(
             logger.warning("emotion log failed: %s", exc)
 
     history_rows = full_ctx.history[:-1] if full_ctx.history else []
-    messages = _ctx_messages(BASE_SYSTEM, full_ctx, history_rows, body.message)
+    messages = _ctx_messages(_base_system(), full_ctx, history_rows, body.message)
 
     response = await default_router().chat(messages, profile=body.profile)  # type: ignore[arg-type]
     await convos.add(user.user_id, "assistant", response.text)
@@ -193,7 +200,7 @@ async def stream(
             logger.warning("emotion log failed: %s", exc)
 
     history_rows = full_ctx.history[:-1] if full_ctx.history else []
-    messages = _ctx_messages(BASE_SYSTEM, full_ctx, history_rows, body.message)
+    messages = _ctx_messages(_base_system(), full_ctx, history_rows, body.message)
     history_snapshot = list(full_ctx.history)
     user_message = body.message
     profile = body.profile
@@ -205,8 +212,6 @@ async def stream(
         try:
             async for chunk in default_router().stream(messages, profile=profile):  # type: ignore[arg-type]
                 collected.append(chunk)
-                # Кодируем чанк как JSON, чтобы пробелы и переводы строк
-                # передавались БУКВАЛЬНО, не теряясь в SSE-парсере.
                 payload = json.dumps({"t": chunk}, ensure_ascii=False)
                 yield f"data: {payload}\n\n".encode("utf-8")
             yield b"event: done\ndata: end\n\n"
