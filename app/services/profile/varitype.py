@@ -1,17 +1,4 @@
-"""Varitype Knowledge Base → фрагмент system prompt с профилем пользователя.
-
-Профиль пользователя хранится в users.profile как JSON вида:
-
-    {
-        "dominant": "СБ" | "ТФ" | "УБ" | "ЧВ",
-        "СБ": 1-6, "ТФ": 1-6, "УБ": 1-6, "ЧВ": 1-6,
-        "perception_type": "...",
-        "thinking_level": 1-9
-    }
-
-Функция `build_profile_prompt` возвращает компактный текстовый фрагмент
-для system-message, опираясь на локальную `varitype-kb-v2.json`.
-"""
+"""Varitype Knowledge Base → фрагмент system prompt с профилем пользователя."""
 
 from __future__ import annotations
 
@@ -66,8 +53,13 @@ def describe_vector(kb: dict[str, Any], code: str, level: int) -> dict[str, Any]
 
 
 def build_profile_prompt(profile: dict[str, Any], kb: dict[str, Any] | None = None) -> str:
-    """Строит системный фрагмент с описанием доминанты пользователя."""
-    kb = kb or load_kb()
+    """Строит системный фрагмент с описанием доминанты пользователя.
+
+    `kb=None` → пытается загрузить с диска. Передача `kb={}` намеренно
+    отключает загрузку (используется в тестах) и возвращает пустую строку.
+    """
+    if kb is None:
+        kb = load_kb()
     if not profile or not kb:
         return ""
 
