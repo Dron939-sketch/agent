@@ -1,7 +1,6 @@
 """SQLAlchemy 2.0 декларативные модели Фреди.
 
-Все таблицы используют префикс `fr_*`, чтобы новый стек мог сосуществовать
-с легаси-схемой из main.py.
+Все таблицы с префиксом `fr_*`.
 """
 
 from __future__ import annotations
@@ -140,7 +139,7 @@ class PushSubscription(Base):
 
 
 class EmotionEvent(Base):
-    """Эмоциональная история пользователя (PR 4.5)."""
+    """Эмоциональная история пользователя."""
 
     __tablename__ = "fr_emotion_history"
 
@@ -151,7 +150,28 @@ class EmotionEvent(Base):
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     tone: Mapped[Optional[str]] = mapped_column(String)
     needs_support: Mapped[int] = mapped_column(Integer, default=0)
-    source: Mapped[str] = mapped_column(String, default="text")  # text/audio/both
+    source: Mapped[str] = mapped_column(String, default="text")
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), index=True
+    )
+
+
+class Feedback(Base):
+    """Лайки/дизлайки на ответы Фреди (Sprint 1).
+
+    Используется для:
+    - Ранжирования будущих рекомендаций
+    - Сигнала «не повторять плохой совет» в memory extractor
+    - LLM-as-judge eval pipeline
+    """
+
+    __tablename__ = "fr_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    score: Mapped[int] = mapped_column(Integer)  # +1 like, -1 dislike
+    note: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.current_timestamp(), index=True
     )
