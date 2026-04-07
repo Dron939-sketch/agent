@@ -15,9 +15,32 @@ export type AgentEvent =
   | { type: "step"; step: AgentStep }
   | { type: "done"; answer: string };
 
-const API =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== "undefined" ? "" : "http://localhost:8000");
+/**
+ * Резолв URL бекенда:
+ *   1. NEXT_PUBLIC_API_URL — задан при билде (render.yaml).
+ *   2. Если фронт развёрнут на agent-frontend-*.onrender.com — авто-маппим
+ *      на agent-ynlg.onrender.com (бекенд из этого репозитория).
+ *   3. Локально fallback на http://localhost:8000.
+ */
+function resolveApiUrl(): string {
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (envUrl) return envUrl.replace(/\/$/, "");
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host.includes("agent-frontend") || host === "agent-ynlg.onrender.com") {
+      return "https://agent-ynlg.onrender.com";
+    }
+    if (host === "localhost" || host === "127.0.0.1") {
+      return "http://localhost:8000";
+    }
+    // По умолчанию — Render-овский бекенд этого проекта
+    return "https://agent-ynlg.onrender.com";
+  }
+  return "http://localhost:8000";
+}
+
+const API = resolveApiUrl();
 
 function authHeaders(): HeadersInit {
   if (typeof window === "undefined") return {};
@@ -28,7 +51,7 @@ function authHeaders(): HeadersInit {
 export async function sendChat(
   message: string,
   opts: { profile?: string; useMemory?: boolean } = {}
-): Promise<{ reply: string; model: string; recalled: string[] }> {
+): Promise<{ reply: string; model: string; recalled: string[]; emotion?: string; tone?: string }> {
   const res = await fetch(`${API}/api/chat/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -82,12 +105,7 @@ export function openAgentSocket(
   onEvent: (evt: AgentEvent) => void,
   onClose?: () => void
 ): WebSocket {
-  const wsUrl =
-    (API.startsWith("https")
-      ? API.replace("https", "wss")
-      : API.startsWith("http")
-        ? API.replace("http", "ws")
-        : `ws://${location.host}`) + "/api/agents/ws";
+  const wsUrl = (API.startsWith("https") ? API.replace("https", "wss") : API.replace("http", "ws")) + "/api/agents/ws";
   const ws = new WebSocket(wsUrl);
   ws.onopen = () => ws.send(JSON.stringify(payload));
   ws.onmessage = (ev) => {
