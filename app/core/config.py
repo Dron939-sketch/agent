@@ -21,8 +21,11 @@ class Config:
     OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
     OLLAMA_BASE_URL: str = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
-    # === Внешние сервисы ===
+    # === Voice / STT провайдеры ===
     YANDEX_API_KEY: str = os.environ.get("YANDEX_API_KEY", "")
+    DEEPGRAM_API_KEY: str = os.environ.get("DEEPGRAM_API_KEY", "")
+
+    # === Прочие внешние сервисы ===
     OPENWEATHER_API_KEY: str = os.environ.get("OPENWEATHER_API_KEY", "")
     TAVILY_API_KEY: str = os.environ.get("TAVILY_API_KEY", "")
 
