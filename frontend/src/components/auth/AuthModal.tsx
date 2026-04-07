@@ -4,12 +4,11 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { LogIn, UserPlus, X } from "lucide-react";
 import { useSession } from "@/store/session";
+import { resolveApiUrl } from "@/lib/api";
 
 type Mode = "login" | "register";
 
-const API =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== "undefined" ? "" : "http://localhost:8000");
+const API = resolveApiUrl();
 
 async function apiPost(path: string, body: unknown) {
   const res = await fetch(`${API}${path}`, {
@@ -17,7 +16,16 @@ async function apiPost(path: string, body: unknown) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const data = await res.json();
+      detail = data.detail || JSON.stringify(data);
+    } catch {
+      detail = await res.text();
+    }
+    throw new Error(`${res.status}: ${detail.slice(0, 200)}`);
+  }
   return res.json();
 }
 
