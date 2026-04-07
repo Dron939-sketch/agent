@@ -3,6 +3,8 @@ import "./globals.css";
 import { CommandPalette } from "@/components/cmdk/CommandPalette";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { Onboarding } from "@/components/onboarding/Onboarding";
+import { I18nProvider } from "@/i18n/I18nProvider";
+import { SWRegister } from "@/components/pwa/SWRegister";
 
 export const metadata: Metadata = {
   title: "Фреди — всемогущий AI-помощник",
@@ -33,11 +35,14 @@ export default function RootLayout({
   return (
     <html lang="ru" className="dark">
       <body className="font-sans selection:bg-neon-violet/40">
-        <CommandPalette>
-          {children}
-          <AuthModal />
-          <Onboarding />
-        </CommandPalette>
+        <I18nProvider>
+          <CommandPalette>
+            {children}
+            <AuthModal />
+            <Onboarding />
+            <SWRegister />
+          </CommandPalette>
+        </I18nProvider>
       </body>
     </html>
   );
