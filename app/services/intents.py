@@ -1,10 +1,4 @@
-"""Детект явных команд пользователя в чате.
-
-Три типа intent'ов, которые мы обрабатываем без LLM:
-- forget: «забудь X», «удали X из памяти»
-- remember: «запомни что X», «не забудь X»
-- list_memory: «что ты помнишь обо мне»
-"""
+"""Детект явных команд пользователя в чате."""
 
 from __future__ import annotations
 
@@ -21,16 +15,17 @@ class Intent:
     payload: str = ""
 
 
+# Разрешаем запятые, двоеточия и пробелы после ключевого глагола.
 _FORGET_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"(?i)\bзабудь(?:\s+(?:что|про|о))?\s+(.+)$"),
-    re.compile(r"(?i)\bудали(?:\s+из\s+памяти)?\s+(.+)$"),
-    re.compile(r"(?i)\bне\s+помни\s+(.+)$"),
+    re.compile(r"(?i)\bзабудь[,:\s]+(?:что|про|о[бв]?)?[,:\s]*(.+)$"),
+    re.compile(r"(?i)\bудали[,:\s]+(?:из\s+памяти[,:\s]+)?(.+)$"),
+    re.compile(r"(?i)\bне\s+помни[,:\s]+(.+)$"),
 ]
 
 _REMEMBER_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"(?i)\bзапомни(?:\s+что)?\s+(.+)$"),
-    re.compile(r"(?i)\bне\s+забудь(?:\s+что)?\s+(.+)$"),
-    re.compile(r"(?i)\bвот\s+факт:?\s+(.+)$"),
+    re.compile(r"(?i)\bзапомни[,:\s]+(?:что[,:\s]+)?(.+)$"),
+    re.compile(r"(?i)\bне\s+забудь[,:\s]+(?:что[,:\s]+)?(.+)$"),
+    re.compile(r"(?i)\bвот\s+факт[,:\s]+(.+)$"),
 ]
 
 _LIST_PATTERNS: list[re.Pattern[str]] = [
@@ -47,15 +42,17 @@ def detect_intent(text: str) -> Intent:
 
     stripped = text.strip()
 
-    for pat in _FORGET_PATTERNS:
-        m = pat.search(stripped)
-        if m:
-            return Intent(type="forget", payload=m.group(1).strip().rstrip(".!?"))
-
+    # Сначала remember (т.к. «не забудь» содержит «забудь» — pattern для
+    # remember более специфичен и должен проверяться раньше).
     for pat in _REMEMBER_PATTERNS:
         m = pat.search(stripped)
         if m:
             return Intent(type="remember", payload=m.group(1).strip().rstrip(".!?"))
+
+    for pat in _FORGET_PATTERNS:
+        m = pat.search(stripped)
+        if m:
+            return Intent(type="forget", payload=m.group(1).strip().rstrip(".!?"))
 
     for pat in _LIST_PATTERNS:
         if pat.search(stripped):
