@@ -1,13 +1,19 @@
-"""Системные роуты: root landing, health, version."""
+"""Системные роуты: root landing, health, version, keepalive."""
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, Response
+from sqlalchemy import text
 
 from app.core.config import Config
+from app.db import session_scope
 
 router = APIRouter(tags=["system"])
+
+_STARTED_AT = time.time()
 
 
 _LANDING_HTML = """<!doctype html>
@@ -89,6 +95,7 @@ li a:hover {{ background: rgba(168,85,247,.18); border-color: rgba(168,85,247,.4
     <li><a href="/redoc">/redoc <span class="pill">ReDoc</span></a></li>
     <li><a href="/health">/health <span class="pill">healthcheck</span></a></li>
     <li><a href="/version">/version <span class="pill">build info</span></a></li>
+    <li><a href="/keepalive">/keepalive <span class="pill">no-sleep ping</span></a></li>
     <li><a href="/api/auth/me">/api/auth/me <span class="pill">требует токен</span></a></li>
   </ul>
   <div class="foot">всемогущий мульти-агентный AI-помощник</div>
@@ -110,7 +117,7 @@ async def root() -> HTMLResponse:
 
 @router.get("/favicon.ico", include_in_schema=False)
 async def favicon() -> Response:
-    """Прозрачный 1×1 PNG, чтобы не засорять логи 404."""
+    """Прозрачный 1×1 PNG."""
     transparent_png = (
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
         b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8"
@@ -121,8 +128,29 @@ async def favicon() -> Response:
 
 
 @router.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, object]:
+    """Liveness — отдаёт 200 если процесс жив."""
+    return {
+        "status": "ok",
+        "uptime_seconds": int(time.time() - _STARTED_AT),
+    }
+
+
+@router.get("/ready")
+async def ready() -> dict[str, object]:
+    """Readiness — проверяет БД-коннект. 200 если БД отвечает, 503 если нет."""
+    try:
+        async with session_scope() as session:
+            await session.execute(text("SELECT 1"))
+        return {"status": "ready", "database": "ok"}
+    except Exception as exc:
+        return {"status": "degraded", "database": "fail", "error": str(exc)[:200]}
+
+
+@router.get("/keepalive", include_in_schema=False)
+async def keepalive() -> dict[str, str]:
+    """Лёгкий ping для удержания сервиса от засыпания на free-tier хостингах."""
+    return {"status": "alive"}
 
 
 @router.get("/version")
