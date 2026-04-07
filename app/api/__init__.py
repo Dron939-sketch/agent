@@ -1,11 +1,4 @@
-"""FastAPI factory: собирает приложение из роутеров `app.api.*`.
-
-Запускать новый стек:
-    python -m app                # uvicorn host=0.0.0.0 port=$PORT
-
-Legacy `main.py` пока остаётся как самостоятельный entrypoint и будет
-заменён в одном из следующих PR, когда все эндпоинты перейдут в `app.api`.
-"""
+"""FastAPI factory: собирает приложение из роутеров `app.api.*`."""
 
 from __future__ import annotations
 
@@ -18,6 +11,7 @@ from app.core.config import Config
 from app.core.logging import get_logger, setup_logging
 from app.db import dispose_db, init_db
 
+from . import agents as agents_router
 from . import auth as auth_router
 from . import chat as chat_router
 from . import system as system_router
@@ -26,7 +20,7 @@ logger = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):  # noqa: ANN201 - FastAPI lifespan
+async def lifespan(_app: FastAPI):  # noqa: ANN201
     setup_logging()
     Config.ensure_dirs()
     await init_db()
@@ -39,7 +33,6 @@ async def lifespan(_app: FastAPI):  # noqa: ANN201 - FastAPI lifespan
 
 
 def create_app() -> FastAPI:
-    """Фабрика FastAPI-приложения."""
     app = FastAPI(
         title=Config.APP_NAME,
         version=Config.APP_VERSION,
@@ -57,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(system_router.router)
     app.include_router(auth_router.router)
     app.include_router(chat_router.router)
+    app.include_router(agents_router.router)
 
     return app
 
