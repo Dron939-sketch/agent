@@ -6,6 +6,8 @@ venv/
 .env
 .env.local
 data/
+!data/knowledge/
+!data/knowledge/**
 backups/
 logs/
 static/

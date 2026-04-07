@@ -72,6 +72,11 @@ export async function sendChat(
   return res.json();
 }
 
+/**
+ * SSE-стрим сервера. Сервер отдаёт чанки в формате `data: {"t": "..."}\n\n`,
+ * сохраняя ВСЕ пробелы и переводы строк. Раньше .trim() съедал ведущие
+ * пробелы между чанками — слова слипались.
+ */
 export async function streamChat(
   message: string,
   onChunk: (chunk: string) => void,
@@ -96,13 +101,27 @@ export async function streamChat(
     const { value, done } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
-    const parts = buf.split("\n\n");
-    buf = parts.pop() ?? "";
-    for (const part of parts) {
-      const line = part.split("\n").find((l) => l.startsWith("data:"));
-      if (!line) continue;
-      const data = line.slice(5).trim();
-      if (data && data !== "end") onChunk(data);
+    // SSE события разделены пустой строкой
+    const events = buf.split("\n\n");
+    buf = events.pop() ?? "";
+    for (const evt of events) {
+      // Каждое событие может содержать несколько строк; ищем "data:"
+      for (const line of evt.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        // SSE-спека: после "data:" допустим один опциональный пробел
+        let raw = line.slice(5);
+        if (raw.startsWith(" ")) raw = raw.slice(1);
+        if (!raw || raw === "end") continue;
+        try {
+          const parsed = JSON.parse(raw) as { t?: string };
+          if (typeof parsed.t === "string") {
+            onChunk(parsed.t);
+          }
+        } catch {
+          // Если бекенд старого формата — берём как есть
+          onChunk(raw);
+        }
+      }
     }
   }
 }
