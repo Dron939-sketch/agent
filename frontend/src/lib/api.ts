@@ -13,7 +13,8 @@ export type AgentStep = {
 
 export type AgentEvent =
   | { type: "step"; step: AgentStep }
-  | { type: "done"; answer: string };
+  | { type: "done"; answer: string }
+  | { type: "error"; message: string };
 
 /**
  * Резолв URL бекенда:
@@ -22,7 +23,7 @@ export type AgentEvent =
  *      на agent-ynlg.onrender.com (бекенд из этого репозитория).
  *   3. Локально fallback на http://localhost:8000.
  */
-function resolveApiUrl(): string {
+export function resolveApiUrl(): string {
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl) return envUrl.replace(/\/$/, "");
 
@@ -34,7 +35,6 @@ function resolveApiUrl(): string {
     if (host === "localhost" || host === "127.0.0.1") {
       return "http://localhost:8000";
     }
-    // По умолчанию — Render-овский бекенд этого проекта
     return "https://agent-ynlg.onrender.com";
   }
   return "http://localhost:8000";
@@ -47,6 +47,13 @@ function authHeaders(): HeadersInit {
   const token = localStorage.getItem("freddy_token");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
+
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("freddy_token");
+}
+
+// === Chat ===
 
 export async function sendChat(
   message: string,
@@ -100,13 +107,20 @@ export async function streamChat(
   }
 }
 
+// === Agents (REST + WS) ===
+
 export function openAgentSocket(
   payload: { task: string; mode?: "single" | "pipeline"; profile?: string },
   onEvent: (evt: AgentEvent) => void,
   onClose?: () => void
-): WebSocket {
-  const wsUrl = (API.startsWith("https") ? API.replace("https", "wss") : API.replace("http", "ws")) + "/api/agents/ws";
-  const ws = new WebSocket(wsUrl);
+): WebSocket | null {
+  const token = getToken();
+  if (!token) {
+    onEvent({ type: "error", message: "missing auth token" });
+    return null;
+  }
+  const wsBase = API.startsWith("https") ? API.replace("https", "wss") : API.replace("http", "ws");
+  const ws = new WebSocket(`${wsBase}/api/agents/ws?token=${encodeURIComponent(token)}`);
   ws.onopen = () => ws.send(JSON.stringify(payload));
   ws.onmessage = (ev) => {
     try {
@@ -119,6 +133,50 @@ export function openAgentSocket(
   return ws;
 }
 
+// === Voice ===
+
+export async function transcribeAudio(audio: Blob): Promise<{ text: string; provider: string }> {
+  const fd = new FormData();
+  fd.append("audio", audio, "voice.webm");
+  const res = await fetch(`${API}/api/voice/stt`, {
+    method: "POST",
+    headers: { ...authHeaders() },
+    body: fd
+  });
+  if (!res.ok) throw new Error(`stt ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+export async function synthesizeSpeech(text: string, voice = "jane"): Promise<Blob> {
+  const res = await fetch(`${API}/api/voice/tts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ text, voice })
+  });
+  if (!res.ok) throw new Error(`tts ${res.status}: ${await res.text()}`);
+  return res.blob();
+}
+
+// === Push ===
+
+export async function getVapidPublicKey(): Promise<string> {
+  const res = await fetch(`${API}/api/push/public-key`);
+  if (!res.ok) throw new Error(`vapid ${res.status}`);
+  const data = (await res.json()) as { key: string };
+  return data.key;
+}
+
+export async function subscribePush(subscription: PushSubscriptionJSON): Promise<void> {
+  const res = await fetch(`${API}/api/push/subscribe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(subscription)
+  });
+  if (!res.ok) throw new Error(`subscribe ${res.status}`);
+}
+
+// === Auth ===
+
 export async function login(username: string, password: string): Promise<void> {
   const res = await fetch(`${API}/api/auth/login`, {
     method: "POST",
@@ -128,4 +186,13 @@ export async function login(username: string, password: string): Promise<void> {
   if (!res.ok) throw new Error(`login ${res.status}`);
   const data = (await res.json()) as { access_token: string };
   localStorage.setItem("freddy_token", data.access_token);
+}
+
+export async function ping(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API}/health`, { cache: "no-store" });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
