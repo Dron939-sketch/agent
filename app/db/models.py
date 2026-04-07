@@ -1,9 +1,7 @@
 """SQLAlchemy 2.0 декларативные модели Фреди.
 
-Схема воспроизводит существующую SQLite-БД из main.py, чтобы можно было
-работать поверх старой `data/assistant.db` без потери данных.
-Фаза 2 PR4 добавляет таблицу `memories`.
-Фаза 4 добавляет `push_subscriptions`.
+Все таблицы используют префикс `fr_*`, чтобы новый стек мог сосуществовать
+с легаси-схемой из main.py (где, например, `users.user_id` был bigint).
 """
 
 from __future__ import annotations
@@ -20,7 +18,7 @@ class Base(DeclarativeBase):
 
 
 class User(Base):
-    __tablename__ = "users"
+    __tablename__ = "fr_users"
 
     user_id: Mapped[str] = mapped_column(String, primary_key=True)
     username: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True)
@@ -35,15 +33,19 @@ class User(Base):
         server_default=func.current_timestamp(), onupdate=func.current_timestamp()
     )
 
-    sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    messages: Mapped[list["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    sessions: Mapped[list["Session"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    messages: Mapped[list["Conversation"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Session(Base):
-    __tablename__ = "sessions"
+    __tablename__ = "fr_sessions"
 
     token: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("fr_users.user_id"), index=True)
     expires_at: Mapped[datetime]
     created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())
 
@@ -51,20 +53,22 @@ class Session(Base):
 
 
 class Conversation(Base):
-    __tablename__ = "conversations"
+    __tablename__ = "fr_conversations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("fr_users.user_id"), index=True)
     role: Mapped[str] = mapped_column(String)
     content: Mapped[str] = mapped_column(Text)
     extra_metadata: Mapped[Optional[str]] = mapped_column("metadata", Text)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp(), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), index=True
+    )
 
     user: Mapped[User] = relationship(back_populates="messages")
 
 
 class Task(Base):
-    __tablename__ = "tasks"
+    __tablename__ = "fr_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[str]] = mapped_column(String, index=True)
@@ -79,7 +83,7 @@ class Task(Base):
 
 
 class Log(Base):
-    __tablename__ = "logs"
+    __tablename__ = "fr_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     level: Mapped[str] = mapped_column(String)
@@ -89,7 +93,7 @@ class Log(Base):
 
 
 class Backup(Base):
-    __tablename__ = "backups"
+    __tablename__ = "fr_backups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     backup_path: Mapped[str] = mapped_column(String)
@@ -98,7 +102,7 @@ class Backup(Base):
 
 
 class Repository(Base):
-    __tablename__ = "repositories"
+    __tablename__ = "fr_repositories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String, index=True)
@@ -110,24 +114,26 @@ class Repository(Base):
 class Memory(Base):
     """Персистентная векторная память: текст + эмбеддинг (JSON-массив float)."""
 
-    __tablename__ = "memories"
+    __tablename__ = "fr_memories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String, index=True)
     text: Mapped[str] = mapped_column(Text)
     embedding: Mapped[str] = mapped_column(Text)  # JSON-массив
-    kind: Mapped[str] = mapped_column(String, default="message")  # message / summary / fact
+    kind: Mapped[str] = mapped_column(String, default="message")
     extra_metadata: Mapped[Optional[str]] = mapped_column("metadata", Text)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp(), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), index=True
+    )
 
 
 class PushSubscription(Base):
     """Web Push subscription (по одному на endpoint)."""
 
-    __tablename__ = "push_subscriptions"
+    __tablename__ = "fr_push_subscriptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String, index=True)
     endpoint: Mapped[str] = mapped_column(Text, index=True)
-    payload: Mapped[str] = mapped_column(Text)  # JSON {endpoint, keys}
+    payload: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())
