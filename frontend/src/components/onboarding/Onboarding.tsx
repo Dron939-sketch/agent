@@ -4,30 +4,32 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, Brain, MessageSquare, Workflow } from "lucide-react";
 import { useSession } from "@/store/session";
-
-const steps = [
-  {
-    icon: <MessageSquare className="h-8 w-8 text-neon-cyan" />,
-    title: "Диалог с памятью",
-    text: "Пиши как другу. Фреди помнит важное между сессиями через векторную память и подмешивает нужный контекст."
-  },
-  {
-    icon: <Workflow className="h-8 w-8 text-neon-violet" />,
-    title: "Мульти-агент pipeline",
-    text: "Planner → Researcher → Coder → Critic → Executor решают сложные задачи с инструментами и показывают каждый шаг в реальном времени."
-  },
-  {
-    icon: <Brain className="h-8 w-8 text-neon-pink" />,
-    title: "Всемогущий мозг",
-    text: "Claude, GPT-4, DeepSeek и локальные модели работают как одна команда с автоматическим fallback."
-  }
-];
+import { useT } from "@/i18n/I18nProvider";
 
 export function Onboarding() {
   const onboarded = useSession((s) => s.onboarded);
   const markOnboarded = useSession((s) => s.markOnboarded);
   const [idx, setIdx] = useState(0);
   const [visible, setVisible] = useState(false);
+  const t = useT();
+
+  const steps = [
+    {
+      icon: <MessageSquare className="h-8 w-8 text-neon-cyan" />,
+      title: t("onboarding.step1.title"),
+      text: t("onboarding.step1.text")
+    },
+    {
+      icon: <Workflow className="h-8 w-8 text-neon-violet" />,
+      title: t("onboarding.step2.title"),
+      text: t("onboarding.step2.text")
+    },
+    {
+      icon: <Brain className="h-8 w-8 text-neon-pink" />,
+      title: t("onboarding.step3.title"),
+      text: t("onboarding.step3.text")
+    }
+  ];
 
   useEffect(() => {
     if (!onboarded) setVisible(true);
@@ -75,7 +77,7 @@ export function Onboarding() {
                 ))}
               </div>
               <button className="btn-primary" onClick={next}>
-                {idx < steps.length - 1 ? "Дальше" : "Поехали"}
+                {idx < steps.length - 1 ? t("onboarding.next") : t("onboarding.start")}
                 <ArrowRight className="ml-2 h-4 w-4" />
               </button>
             </div>
@@ -86,7 +88,7 @@ export function Onboarding() {
                 setVisible(false);
               }}
             >
-              пропустить
+              {t("onboarding.skip")}
             </button>
           </motion.div>
         </motion.div>
