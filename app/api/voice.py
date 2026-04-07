@@ -1,4 +1,4 @@
-"""Voice endpoints: STT (Deepgram→Yandex auto) и TTS (Yandex)."""
+"""Voice endpoints: STT (Deepgram→Yandex auto), TTS (Yandex), semantic endpoint."""
 
 from __future__ import annotations
 
@@ -8,10 +8,13 @@ from pydantic import BaseModel, Field
 
 from app.auth import AuthenticatedUser
 from app.services.voice import VoiceService
+from app.services.voice_pkg import SemanticEndpointDetector
 
 from .deps import get_current_user
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
+
+_detector = SemanticEndpointDetector()
 
 
 class STTResponse(BaseModel):
@@ -22,6 +25,17 @@ class STTResponse(BaseModel):
 class TTSRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     voice: str = "jane"
+
+
+class EndpointRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    silence_ms: int = 0
+
+
+class EndpointResponse(BaseModel):
+    is_complete: bool
+    confidence: float
+    reason: str
 
 
 def _service() -> VoiceService:
@@ -59,3 +73,17 @@ async def text_to_speech(
             "TTS unavailable (set YANDEX_API_KEY)",
         )
     return Response(content=audio, media_type="audio/ogg")
+
+
+@router.post("/endpoint-check", response_model=EndpointResponse)
+async def endpoint_check(
+    body: EndpointRequest,
+    _user: AuthenticatedUser = Depends(get_current_user),
+) -> EndpointResponse:
+    """Подсказка фронту: закончил ли пользователь мысль (без LLM)."""
+    result = _detector.detect(body.text, silence_ms=body.silence_ms)
+    return EndpointResponse(
+        is_complete=result.is_complete,
+        confidence=result.confidence,
+        reason=result.reason,
+    )
