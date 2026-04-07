@@ -6,3 +6,13 @@ python-multipart==0.0.6
 beautifulsoup4==4.12.2
 lxml==4.9.3
 duckduckgo-search==6.3.2
+
+# === Phase 1: async DB stack ===
+SQLAlchemy[asyncio]==2.0.34
+aiosqlite==0.20.0
+alembic==1.13.2
+argon2-cffi==23.1.0
+
+# === Test deps ===
+pytest==8.3.3
+pytest-asyncio==0.24.0
