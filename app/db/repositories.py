@@ -15,6 +15,7 @@ from .models import (
     Backup,
     Conversation,
     EmotionEvent,
+    Feedback,
     Log,
     Memory,
     Repository,
@@ -31,9 +32,6 @@ class UserRepository:
         self.session = session
 
     async def create(self, user_id: str, username: str, email: str, password_hash: str) -> bool:
-        """Создаёт пользователя в **savepoint**, чтобы IntegrityError на
-        дубликате не откатывал предыдущие успешные операции в той же сессии.
-        """
         try:
             async with self.session.begin_nested():
                 self.session.add(
@@ -100,20 +98,18 @@ class ConversationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def add(self, user_id: str, role: str, content: str, metadata: dict[str, Any] | None = None) -> None:
-        self.session.add(
-            Conversation(
-                user_id=user_id,
-                role=role,
-                content=content,
-                extra_metadata=json.dumps(metadata or {}),
-            )
+    async def add(self, user_id: str, role: str, content: str, metadata: dict[str, Any] | None = None) -> int:
+        conv = Conversation(
+            user_id=user_id,
+            role=role,
+            content=content,
+            extra_metadata=json.dumps(metadata or {}),
         )
+        self.session.add(conv)
         await self.session.flush()
+        return conv.id
 
     async def history(self, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
-        # Сортировка по id DESC даёт стабильный порядок даже когда несколько
-        # сообщений вставлены с одинаковым created_at (бывает в SQLite).
         result = await self.session.execute(
             select(Conversation)
             .where(Conversation.user_id == user_id)
@@ -122,7 +118,7 @@ class ConversationRepository:
         )
         rows = result.scalars().all()
         return [
-            {"role": r.role, "content": r.content, "timestamp": r.created_at}
+            {"id": r.id, "role": r.role, "content": r.content, "timestamp": r.created_at}
             for r in reversed(rows)
         ]
 
@@ -270,13 +266,28 @@ class MemoryRepository:
         return int(result.scalar() or 0)
 
     async def delete_user(self, user_id: str) -> int:
-        # rowcount aiosqlite ненадёжен — считаем заранее
         count = await self.count_for_user(user_id)
         await self.session.execute(delete(Memory).where(Memory.user_id == user_id))
         return count
 
+    async def delete_by_text_match(self, user_id: str, query: str) -> int:
+        """Удаляет memory-записи, в тексте которых содержится подстрока query."""
+        if not query:
+            return 0
+        like = f"%{query.lower()}%"
+        result = await self.session.execute(
+            select(Memory).where(
+                Memory.user_id == user_id,
+                func.lower(Memory.text).like(like),
+            )
+        )
+        rows = list(result.scalars().all())
+        for row in rows:
+            await self.session.delete(row)
+        return len(rows)
 
-# ============ Emotions (PR 4.5) ============
+
+# ============ Emotions ============
 
 class EmotionRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -326,3 +337,39 @@ class EmotionRepository:
         if len(unique) == 2:
             return {"trend": "shifting", "stability": 0.6, "emotions": list(unique)}
         return {"trend": "volatile", "stability": 0.3, "emotions": list(unique)}
+
+
+# ============ Feedback (Sprint 1) ============
+
+class FeedbackRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def add(
+        self,
+        user_id: str,
+        score: int,
+        message_id: int | None = None,
+        note: str | None = None,
+    ) -> int:
+        score = 1 if score > 0 else -1 if score < 0 else 0
+        fb = Feedback(
+            user_id=user_id,
+            score=score,
+            message_id=message_id,
+            note=note,
+        )
+        self.session.add(fb)
+        await self.session.flush()
+        return fb.id
+
+    async def stats(self, user_id: str) -> dict[str, int]:
+        result = await self.session.execute(
+            select(Feedback.score, func.count())
+            .where(Feedback.user_id == user_id)
+            .group_by(Feedback.score)
+        )
+        rows = list(result.all())
+        likes = sum(c for s, c in rows if s > 0)
+        dislikes = sum(c for s, c in rows if s < 0)
+        return {"likes": likes, "dislikes": dislikes, "total": likes + dislikes}

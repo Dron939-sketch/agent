@@ -1,7 +1,14 @@
-"""SQL-backed VectorStore: пишет в таблицу `memories`, ищет в Python.
+"""SQL-backed VectorStore с recency-weighted ranking.
 
-Простой и надёжный способ персистентной памяти без новых зависимостей.
-Для больших объёмов в Фазе 2 PR-следующий добавим Qdrant-адаптер.
+Sprint 1: добавлен `recency_weight` — недавние воспоминания получают
+бонус к cosine similarity. Это снимает ситуацию, когда модель цепляется
+за старый факт вместо более актуального.
+
+Формула: final = cosine * (1 - λ) + recency * λ
+где `λ = 0.25`, `recency = exp(-age_days / half_life)`, `half_life = 14 дней`.
+
+Также `kind=fact` получает +0.05 буст — экстрагированные факты ценнее
+сырых сообщений.
 """
 
 from __future__ import annotations
@@ -9,6 +16,7 @@ from __future__ import annotations
 import json
 import math
 import uuid
+from datetime import datetime
 
 from app.db import MemoryRepository, session_scope
 
@@ -26,8 +34,22 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
+def _recency_score(created_at: datetime | None, half_life_days: float = 14) -> float:
+    """Экспоненциальный затух: 1.0 сейчас, 0.5 через 14 дней."""
+    if created_at is None:
+        return 0.5
+    try:
+        age_days = max(0.0, (datetime.utcnow() - created_at).total_seconds() / 86400)
+    except Exception:
+        return 0.5
+    return math.exp(-age_days / half_life_days)
+
+
 class SQLVectorStore:
-    """VectorStore поверх таблицы `memories`."""
+    """VectorStore поверх таблицы `fr_memories` с recency-aware scoring."""
+
+    RECENCY_WEIGHT = 0.25
+    FACT_BOOST = 0.05
 
     def __init__(self, embedder: Embedder) -> None:
         self.embedder = embedder
@@ -72,7 +94,11 @@ class SQLVectorStore:
                 vec = json.loads(row.embedding)
             except Exception:
                 continue
-            score = _cosine(query_vec, vec)
+            cosine = _cosine(query_vec, vec)
+            recency = _recency_score(row.created_at)
+            base = cosine * (1 - self.RECENCY_WEIGHT) + recency * self.RECENCY_WEIGHT
+            if (row.kind or "") == "fact":
+                base += self.FACT_BOOST
             scored.append(
                 MemoryRecord(
                     id=str(row.id),
@@ -80,7 +106,7 @@ class SQLVectorStore:
                     user_id=row.user_id,
                     metadata=json.loads(row.extra_metadata or "{}"),
                     embedding=vec,
-                    score=score,
+                    score=base,
                 )
             )
         scored.sort(key=lambda r: r.score, reverse=True)
@@ -89,3 +115,8 @@ class SQLVectorStore:
     async def delete_user(self, user_id: str) -> int:
         async with session_scope() as session:
             return await MemoryRepository(session).delete_user(user_id)
+
+    async def forget(self, user_id: str, query: str) -> int:
+        """Удаляет все memory-записи пользователя, содержащие подстроку."""
+        async with session_scope() as session:
+            return await MemoryRepository(session).delete_by_text_match(user_id, query)
