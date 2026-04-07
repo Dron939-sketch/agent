@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  lint-and-test:
+  backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,9 +27,33 @@ jobs:
       - name: Pytest
         run: pytest -q || echo "no tests yet"
 
-  docker-build:
+  frontend:
     runs-on: ubuntu-latest
-    needs: lint-and-test
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t freddy-agent:ci .
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package.json
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Lint
+        run: npm run lint || true
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t freddy-agent:ci .
+      - name: Build frontend image
+        run: docker build -t freddy-frontend:ci frontend
