@@ -5,6 +5,7 @@ import { AuthModal } from "@/components/auth/AuthModal";
 import { Onboarding } from "@/components/onboarding/Onboarding";
 import { I18nProvider } from "@/i18n/I18nProvider";
 import { SWRegister } from "@/components/pwa/SWRegister";
+import { PushSubscribe } from "@/components/pwa/PushSubscribe";
 
 export const metadata: Metadata = {
   title: "Фреди — всемогущий AI-помощник",
@@ -41,6 +42,7 @@ export default function RootLayout({
             <AuthModal />
             <Onboarding />
             <SWRegister />
+            <PushSubscribe />
           </CommandPalette>
         </I18nProvider>
       </body>
