@@ -9,8 +9,9 @@ import {
   KBarResults,
   useMatches
 } from "kbar";
-import { MessageSquare, Workflow, LogIn, Sparkles } from "lucide-react";
+import { MessageSquare, Workflow, LogIn, Sparkles, Languages } from "lucide-react";
 import type { ReactNode } from "react";
+import { useSession } from "@/store/session";
 
 function RenderResults() {
   const { results } = useMatches();
@@ -47,17 +48,14 @@ function scrollTo(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
 
-function setProfile(p: "smart" | "fast" | "cheap" | "local") {
-  if (typeof window === "undefined") return;
-  localStorage.setItem("freddy_profile", p);
-  window.dispatchEvent(new CustomEvent("freddy:profile", { detail: p }));
-}
-
 export function CommandPalette({ children }: { children: ReactNode }) {
+  const setProfile = useSession((s) => s.setProfile);
+  const setLocale = useSession((s) => s.setLocale);
+
   const actions = [
     {
       id: "chat",
-      name: "Открыть чат",
+      name: "Чат · Chat",
       shortcut: ["g", "c"],
       keywords: "chat диалог",
       section: "Навигация",
@@ -75,7 +73,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     },
     {
       id: "login",
-      name: "Войти / Регистрация",
+      name: "Войти / Sign in",
       keywords: "login auth signup",
       section: "Аккаунт",
       icon: <LogIn className="h-4 w-4 text-neon-pink" />,
@@ -92,7 +90,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     },
     {
       id: "profile-fast",
-      name: "Режим: Fast (быстро)",
+      name: "Режим: Fast",
       keywords: "profile fast",
       section: "Режим LLM",
       icon: <Sparkles className="h-4 w-4 text-neon-cyan" />,
@@ -100,7 +98,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     },
     {
       id: "profile-cheap",
-      name: "Режим: Cheap (дёшево)",
+      name: "Режим: Cheap",
       keywords: "profile cheap deepseek",
       section: "Режим LLM",
       icon: <Sparkles className="h-4 w-4 text-neon-pink" />,
@@ -113,6 +111,22 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       section: "Режим LLM",
       icon: <Sparkles className="h-4 w-4 text-neon-violet" />,
       perform: () => setProfile("local")
+    },
+    {
+      id: "lang-ru",
+      name: "Язык: Русский",
+      keywords: "language locale russian",
+      section: "Язык",
+      icon: <Languages className="h-4 w-4 text-neon-cyan" />,
+      perform: () => setLocale("ru")
+    },
+    {
+      id: "lang-en",
+      name: "Language: English",
+      keywords: "language locale english",
+      section: "Язык",
+      icon: <Languages className="h-4 w-4 text-neon-lime" />,
+      perform: () => setLocale("en")
     }
   ];
 
@@ -123,7 +137,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           <KBarAnimator className="w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-bg-soft/95 shadow-neon">
             <KBarSearch
               className="w-full bg-transparent px-5 py-4 text-base text-white placeholder:text-slate-500 focus:outline-none"
-              placeholder="Спроси Фреди или выбери команду…"
+              placeholder="Ask Freddy or run a command…"
             />
             <div className="border-t border-white/5 py-2">
               <RenderResults />
