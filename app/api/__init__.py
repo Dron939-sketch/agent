@@ -9,11 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import Config
 from app.core.logging import get_logger, setup_logging
+from app.core.observability import init_sentry
 from app.db import dispose_db, init_db
 
 from . import agents as agents_router
 from . import auth as auth_router
 from . import chat as chat_router
+from . import push as push_router
 from . import system as system_router
 from . import voice as voice_router
 
@@ -23,9 +25,15 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):  # noqa: ANN201
     setup_logging()
+    init_sentry()
     Config.ensure_dirs()
     await init_db()
-    logger.info("🚀 %s %s started", Config.APP_NAME, Config.APP_VERSION)
+    logger.info(
+        "🚀 %s %s started (env=%s)",
+        Config.APP_NAME,
+        Config.APP_VERSION,
+        Config.ENVIRONMENT,
+    )
     try:
         yield
     finally:
@@ -53,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router.router)
     app.include_router(agents_router.router)
     app.include_router(voice_router.router)
+    app.include_router(push_router.router)
 
     return app
 
