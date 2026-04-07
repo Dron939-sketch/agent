@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { CommandPalette } from "@/components/cmdk/CommandPalette";
+import { AuthModal } from "@/components/auth/AuthModal";
+import { Onboarding } from "@/components/onboarding/Onboarding";
 
 export const metadata: Metadata = {
   title: "Фреди — всемогущий AI-помощник",
@@ -16,7 +19,11 @@ export default function RootLayout({
   return (
     <html lang="ru" className="dark">
       <body className="font-sans selection:bg-neon-violet/40">
-        {children}
+        <CommandPalette>
+          {children}
+          <AuthModal />
+          <Onboarding />
+        </CommandPalette>
       </body>
     </html>
   );
