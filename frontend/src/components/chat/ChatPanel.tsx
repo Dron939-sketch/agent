@@ -1,23 +1,31 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Sparkles } from "lucide-react";
+import { LogIn, Send, Sparkles } from "lucide-react";
 import { streamChat, type ChatMessage } from "@/lib/api";
+import { useSession } from "@/store/session";
 
 type Props = {
   id?: string;
   onStateChange?: (s: "idle" | "thinking" | "speaking") => void;
 };
 
+function openAuth() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("freddy:open-auth"));
+  }
+}
+
 export function ChatPanel({ id, onStateChange }: Props) {
+  const token = useSession((s) => s.token);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
       content:
-        "Привет! Я Фреди. Спроси что-нибудь или скомандуй — я подключу инструменты и память."
+        "Привет! Я Фреди — твой всемогущий AI-помощник. Войди или зарегистрируйся, и можем начинать."
     }
   ]);
   const [input, setInput] = useState("");
@@ -26,6 +34,12 @@ export function ChatPanel({ id, onStateChange }: Props) {
 
   async function onSend() {
     if (!input.trim() || busy) return;
+
+    if (!token) {
+      openAuth();
+      return;
+    }
+
     const user = input.trim();
     setInput("");
     setMessages((m) => [...m, { role: "user", content: user }]);
@@ -45,10 +59,18 @@ export function ChatPanel({ id, onStateChange }: Props) {
         });
       });
     } catch (err) {
+      const msg = (err as Error).message;
+      const is401 = msg.includes(" 401") || msg.includes("missing bearer");
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: `⚠️ Ошибка: ${(err as Error).message}` }
+        {
+          role: "assistant",
+          content: is401
+            ? "🔒 Нужна авторизация. Открываю окно входа…"
+            : `⚠️ Ошибка: ${msg}`
+        }
       ]);
+      if (is401) openAuth();
     } finally {
       setBusy(false);
       onStateChange?.("idle");
@@ -61,12 +83,30 @@ export function ChatPanel({ id, onStateChange }: Props) {
     }
   }
 
+  // Если токен только что появился — добавим приветственный системный месседж
+  useEffect(() => {
+    if (token) {
+      setMessages((m) => {
+        if (m.some((x) => x.content.startsWith("✅"))) return m;
+        return [
+          ...m,
+          {
+            role: "assistant",
+            content: "✅ Подключился. Расскажи, что у тебя сегодня — помогу разобраться."
+          }
+        ];
+      });
+    }
+  }, [token]);
+
   return (
     <section id={id} className="glass flex h-[560px] flex-col p-4">
       <div className="mb-3 flex items-center gap-2 text-sm text-slate-300">
         <Sparkles className="h-4 w-4 text-neon-violet" />
         <span>Диалог с Фреди</span>
-        <span className="ml-auto text-xs text-slate-500">SSE · router · memory</span>
+        <span className="ml-auto text-xs text-slate-500">
+          {token ? "SSE · router · memory" : "guest"}
+        </span>
       </div>
 
       <div
@@ -110,17 +150,27 @@ export function ChatPanel({ id, onStateChange }: Props) {
               onSend();
             }
           }}
-          placeholder="Спроси Фреди…"
+          placeholder={token ? "Спроси Фреди…" : "Сначала войди →"}
           rows={1}
           className="input resize-none"
         />
-        <button
-          onClick={onSend}
-          disabled={busy}
-          className="btn-primary h-[46px] px-4 disabled:opacity-60"
-        >
-          <Send className="h-4 w-4" />
-        </button>
+        {token ? (
+          <button
+            onClick={onSend}
+            disabled={busy}
+            className="btn-primary h-[46px] px-4 disabled:opacity-60"
+          >
+            <Send className="h-4 w-4" />
+          </button>
+        ) : (
+          <button
+            onClick={openAuth}
+            className="btn-primary h-[46px] px-4"
+            title="Войти / Регистрация"
+          >
+            <LogIn className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </section>
   );
