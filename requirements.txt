@@ -4,19 +4,24 @@ aiohttp==3.10.10
 aiofiles==23.2.1
 python-multipart==0.0.6
 beautifulsoup4==4.12.2
-# lxml 5.3+ поставляется с manylinux wheels для py3.11
 lxml==5.3.0
-# 7.x имеет wheels под Linux/py3.11 (без сборки primp из исходников)
 duckduckgo-search==7.2.1
 
-# === Phase 1: async DB stack ===
+# === Async DB stack ===
 SQLAlchemy[asyncio]==2.0.34
 aiosqlite==0.20.0
+asyncpg==0.30.0
 alembic==1.13.2
 argon2-cffi==23.1.0
 
-# === Phase 1: validation ===
+# === Validation ===
 pydantic[email]==2.9.2
+
+# === Web push (опц.) ===
+pywebpush==2.0.0
+
+# === Observability (опц.) ===
+sentry-sdk[fastapi]==2.17.0
 
 # === Test deps ===
 pytest==8.3.3
