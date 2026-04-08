@@ -55,6 +55,11 @@ export type VoiceInfo = {
   default?: boolean;
 };
 
+/** Sprint 5: события стрима — токен (для UI) или предложение (для TTS). */
+export type StreamEvent =
+  | { type: "token"; text: string }
+  | { type: "sentence"; text: string };
+
 export function resolveApiUrl(): string {
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl) return envUrl.replace(/\/$/, "");
@@ -111,9 +116,16 @@ export async function sendChat(
   return res.json();
 }
 
-export async function streamChat(
+/**
+ * Sprint 5: streamChatEvents — поддерживает оба типа событий из SSE.
+ *
+ * Сервер шлёт `data: {"t": "..."}` для UI-токенов и `data: {"s": "..."}`
+ * для готовых предложений. Фронт может одновременно показывать токены
+ * в bubble И запускать TTS для каждого предложения.
+ */
+export async function streamChatEvents(
   message: string,
-  onChunk: (chunk: string) => void,
+  onEvent: (evt: StreamEvent) => void,
   opts: { profile?: string; useMemory?: boolean } = {}
 ): Promise<void> {
   const res = await fetch(`${API}/api/chat/stream`, {
@@ -144,16 +156,33 @@ export async function streamChat(
         if (raw.startsWith(" ")) raw = raw.slice(1);
         if (!raw || raw === "end") continue;
         try {
-          const parsed = JSON.parse(raw) as { t?: string };
+          const parsed = JSON.parse(raw) as { t?: string; s?: string };
           if (typeof parsed.t === "string") {
-            onChunk(parsed.t);
+            onEvent({ type: "token", text: parsed.t });
+          } else if (typeof parsed.s === "string") {
+            onEvent({ type: "sentence", text: parsed.s });
           }
         } catch {
-          onChunk(raw);
+          onEvent({ type: "token", text: raw });
         }
       }
     }
   }
+}
+
+/** Backward-compat: только токены, для старого кода. */
+export async function streamChat(
+  message: string,
+  onChunk: (chunk: string) => void,
+  opts: { profile?: string; useMemory?: boolean } = {}
+): Promise<void> {
+  return streamChatEvents(
+    message,
+    (evt) => {
+      if (evt.type === "token") onChunk(evt.text);
+    },
+    opts
+  );
 }
 
 // === Agents ===
