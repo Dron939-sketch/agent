@@ -8,6 +8,9 @@ import { ChatPanel } from "@/components/chat/ChatPanel";
 import { AgentTimeline } from "@/components/timeline/AgentTimeline";
 import { DashboardTiles } from "@/components/dashboard/DashboardTiles";
 import { MoodGraph } from "@/components/dashboard/MoodGraph";
+import { RemindersWidget } from "@/components/dashboard/RemindersWidget";
+import { NotificationPanel } from "@/components/dashboard/NotificationPanel";
+import { KnowledgeGraph } from "@/components/dashboard/KnowledgeGraph";
 import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
 import { useSession } from "@/store/session";
 
@@ -35,7 +38,7 @@ export default function HomePage() {
 
   return (
     <main className="relative min-h-screen">
-      <header className="flex items-center justify-between px-8 py-6">
+      <header className="flex items-center justify-between px-4 py-4 sm:px-8 sm:py-6">
         <motion.div
           initial={{ opacity: 0, y: -12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -53,6 +56,7 @@ export default function HomePage() {
           <a className="hover:text-white" href="#agents">Агенты</a>
           <a className="hover:text-white" href="#mood">Настроение</a>
           <a className="hover:text-white" href="#dashboard">Дашборд</a>
+          <NotificationPanel />
           <kbd className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-slate-400">
             ⌘K
           </kbd>
@@ -75,7 +79,7 @@ export default function HomePage() {
         </nav>
       </header>
 
-      <section className="mx-auto grid max-w-7xl gap-6 px-6 pb-10 md:grid-cols-[1.1fr_1fr] lg:grid-cols-[1.2fr_1fr_0.9fr]">
+      <section className="mx-auto grid max-w-7xl gap-4 px-4 pb-10 sm:gap-6 sm:px-6 md:grid-cols-[1.1fr_1fr] lg:grid-cols-[1.2fr_1fr_0.9fr]">
         <div className="glass relative aspect-square min-h-[320px] overflow-hidden md:aspect-auto md:min-h-[560px]">
           <div className="absolute inset-0 bg-aurora opacity-60" />
           <FreddyAvatar state={agentState} />
@@ -92,11 +96,18 @@ export default function HomePage() {
       </section>
 
       <MoodGraph id="mood" />
+
+      {/* Sprint 8+7: Reminders + Knowledge Graph widgets */}
+      <section className="mx-auto grid max-w-7xl gap-4 px-4 pb-6 sm:px-6 md:grid-cols-2">
+        <RemindersWidget />
+        <KnowledgeGraph />
+      </section>
+
       <DashboardTiles id="dashboard" />
 
       <VoiceRecorder />
 
-      <footer className="px-8 pb-10 text-center text-xs text-slate-500">
+      <footer className="px-4 pb-10 text-center text-xs text-slate-500 sm:px-8">
         Фреди · Next.js 14 + R3F + Framer Motion · PWA · autonomous
       </footer>
     </main>
