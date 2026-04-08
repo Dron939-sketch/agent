@@ -16,6 +16,37 @@ export type AgentEvent =
   | { type: "done"; answer: string }
   | { type: "error"; message: string };
 
+export type EmotionTopItem = { name: string; raw: string; score: number };
+export type VoiceEmotion = {
+  primary: string;
+  primary_raw: string;
+  intensity: number;
+  confidence: number;
+  top_5: EmotionTopItem[];
+};
+
+export type TextEmotion = {
+  primary: string;
+  confidence: number;
+  intensity: number;
+  needs_support: boolean;
+  tone: string;
+  scores?: Record<string, number>;
+};
+
+export type FullLoopResponse = {
+  transcript: string;
+  transcript_provider: string;
+  voice_emotion: VoiceEmotion | null;
+  text_emotion: TextEmotion | null;
+  fused_emotion: string | null;
+  fused_tone: string | null;
+  reply: string;
+  reply_model: string;
+  intent: string | null;
+  audio_url: string | null;
+};
+
 /**
  * Резолв URL бекенда:
  *   1. NEXT_PUBLIC_API_URL — задан при билде (render.yaml).
@@ -58,7 +89,7 @@ function getToken(): string | null {
 export async function sendChat(
   message: string,
   opts: { profile?: string; useMemory?: boolean } = {}
-): Promise<{ reply: string; model: string; recalled: string[]; emotion?: string; tone?: string }> {
+): Promise<{ reply: string; model: string; recalled: string[]; emotion?: string; tone?: string; message_id?: number }> {
   const res = await fetch(`${API}/api/chat/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -72,11 +103,6 @@ export async function sendChat(
   return res.json();
 }
 
-/**
- * SSE-стрим сервера. Сервер отдаёт чанки в формате `data: {"t": "..."}\n\n`,
- * сохраняя ВСЕ пробелы и переводы строк. Раньше .trim() съедал ведущие
- * пробелы между чанками — слова слипались.
- */
 export async function streamChat(
   message: string,
   onChunk: (chunk: string) => void,
@@ -101,14 +127,11 @@ export async function streamChat(
     const { value, done } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
-    // SSE события разделены пустой строкой
     const events = buf.split("\n\n");
     buf = events.pop() ?? "";
     for (const evt of events) {
-      // Каждое событие может содержать несколько строк; ищем "data:"
       for (const line of evt.split("\n")) {
         if (!line.startsWith("data:")) continue;
-        // SSE-спека: после "data:" допустим один опциональный пробел
         let raw = line.slice(5);
         if (raw.startsWith(" ")) raw = raw.slice(1);
         if (!raw || raw === "end") continue;
@@ -118,7 +141,6 @@ export async function streamChat(
             onChunk(parsed.t);
           }
         } catch {
-          // Если бекенд старого формата — берём как есть
           onChunk(raw);
         }
       }
@@ -166,14 +188,96 @@ export async function transcribeAudio(audio: Blob): Promise<{ text: string; prov
   return res.json();
 }
 
-export async function synthesizeSpeech(text: string, voice = "jane"): Promise<Blob> {
+export async function synthesizeSpeech(
+  text: string,
+  opts: { voice?: string; tone?: string; prefer?: "auto" | "elevenlabs" | "yandex" } = {}
+): Promise<Blob> {
   const res = await fetch(`${API}/api/voice/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ text, voice })
+    body: JSON.stringify({
+      text,
+      voice: opts.voice ?? "jane",
+      tone: opts.tone ?? "warm",
+      prefer: opts.prefer ?? "auto"
+    })
   });
   if (!res.ok) throw new Error(`tts ${res.status}: ${await res.text()}`);
   return res.blob();
+}
+
+/**
+ * Streaming TTS — возвращает MediaSource URL, который можно сразу отдать
+ * `<audio src=...>`. Если ElevenLabs не настроен, fallback на обычный
+ * synthesizeSpeech().
+ */
+export async function streamSpeech(
+  text: string,
+  opts: { tone?: string } = {}
+): Promise<string> {
+  const res = await fetch(`${API}/api/voice/tts/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ text, tone: opts.tone ?? "warm" })
+  });
+  if (!res.ok || !res.body) {
+    // fallback на синхронный
+    const blob = await synthesizeSpeech(text, opts);
+    return URL.createObjectURL(blob);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+/**
+ * Полный голосовой цикл: audio in → STT + voice emotion → LLM → reply.
+ * Одна сетевая поездка вместо четырёх.
+ */
+export async function voiceFullLoop(audio: Blob): Promise<FullLoopResponse> {
+  const fd = new FormData();
+  fd.append("audio", audio, "voice.webm");
+  const res = await fetch(`${API}/api/voice/full-loop`, {
+    method: "POST",
+    headers: { ...authHeaders() },
+    body: fd
+  });
+  if (!res.ok) throw new Error(`full-loop ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+// === Vision ===
+
+export async function analyzeImage(
+  image: Blob,
+  question = "Опиши изображение по-русски."
+): Promise<{ text: string; provider: string }> {
+  const fd = new FormData();
+  fd.append("image", image, "image.png");
+  fd.append("question", question);
+  const res = await fetch(`${API}/api/vision/analyze`, {
+    method: "POST",
+    headers: { ...authHeaders() },
+    body: fd
+  });
+  if (!res.ok) throw new Error(`vision ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+export async function generateImage(
+  prompt: string,
+  opts: { aspectRatio?: string; numOutputs?: number } = {}
+): Promise<{ urls: string[]; provider: string; prompt: string }> {
+  const res = await fetch(`${API}/api/vision/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({
+      prompt,
+      aspect_ratio: opts.aspectRatio ?? "1:1",
+      num_outputs: opts.numOutputs ?? 1
+    })
+  });
+  if (!res.ok) throw new Error(`gen ${res.status}: ${await res.text()}`);
+  return res.json();
 }
 
 // === Push ===
@@ -192,6 +296,22 @@ export async function subscribePush(subscription: PushSubscriptionJSON): Promise
     body: JSON.stringify(subscription)
   });
   if (!res.ok) throw new Error(`subscribe ${res.status}`);
+}
+
+// === Feedback (Sprint 1) ===
+
+export async function sendFeedback(
+  score: 1 | -1 | 0,
+  messageId?: number,
+  note?: string
+): Promise<{ id: number }> {
+  const res = await fetch(`${API}/api/feedback/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ score, message_id: messageId ?? null, note: note ?? null })
+  });
+  if (!res.ok) throw new Error(`feedback ${res.status}`);
+  return res.json();
 }
 
 // === Auth ===
@@ -214,4 +334,12 @@ export async function ping(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// === Integrations status ===
+
+export async function getIntegrations(): Promise<Record<string, unknown>> {
+  const res = await fetch(`${API}/integrations`);
+  if (!res.ok) throw new Error(`integrations ${res.status}`);
+  return res.json();
 }

@@ -2,25 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, X, Volume2 } from "lucide-react";
-import { sendChat, synthesizeSpeech, transcribeAudio } from "@/lib/api";
+import { Mic, MicOff, Volume2, X } from "lucide-react";
+import { streamSpeech, voiceFullLoop, type FullLoopResponse } from "@/lib/api";
 import { useSession } from "@/store/session";
 import { SilenceDetector } from "@/lib/vad";
+import { EmotionBadge } from "./EmotionBadge";
 
-type Props = {
-  /** Опционально: внешний обработчик распознанного текста (для интеграций). */
-  onTranscript?: (text: string) => void;
-};
+type Phase = "idle" | "recording" | "processing" | "speaking" | "error";
 
-type Phase = "idle" | "recording" | "transcribing" | "thinking" | "speaking" | "error";
-
-export function VoiceRecorder({ onTranscript }: Props) {
+export function VoiceRecorder() {
   const token = useSession((s) => s.token);
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [level, setLevel] = useState<number[]>(new Array(48).fill(0));
-  const [transcript, setTranscript] = useState("");
-  const [reply, setReply] = useState("");
+  const [result, setResult] = useState<FullLoopResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const mediaRef = useRef<MediaStream | null>(null);
@@ -30,7 +25,6 @@ export function VoiceRecorder({ onTranscript }: Props) {
   const chunksRef = useRef<Blob[]>([]);
   const vadRef = useRef<SilenceDetector | null>(null);
   const playerRef = useRef<HTMLAudioElement | null>(null);
-  const stoppedAutoRef = useRef(false);
 
   function cleanupRecording() {
     try {
@@ -51,9 +45,7 @@ export function VoiceRecorder({ onTranscript }: Props) {
       return;
     }
     setError(null);
-    setTranscript("");
-    setReply("");
-    stoppedAutoRef.current = false;
+    setResult(null);
     setPhase("recording");
 
     try {
@@ -87,7 +79,6 @@ export function VoiceRecorder({ onTranscript }: Props) {
       const vad = new SilenceDetector(stream, ctx, {
         onSilence: () => {
           if (recorderRef.current && recorderRef.current.state === "recording") {
-            stoppedAutoRef.current = true;
             stopRecording();
           }
         },
@@ -107,7 +98,7 @@ export function VoiceRecorder({ onTranscript }: Props) {
           setPhase("idle");
           return;
         }
-        await runVoiceLoop(blob);
+        await runFullLoop(blob);
       };
       recorderRef.current = recorder;
       recorder.start();
@@ -123,58 +114,40 @@ export function VoiceRecorder({ onTranscript }: Props) {
     } catch {}
   }
 
-  async function runVoiceLoop(blob: Blob) {
-    setPhase("transcribing");
-    let userText = "";
+  async function runFullLoop(blob: Blob) {
+    setPhase("processing");
+    let response: FullLoopResponse;
     try {
-      const stt = await transcribeAudio(blob);
-      userText = stt.text || "";
-      setTranscript(userText);
-      onTranscript?.(userText);
+      response = await voiceFullLoop(blob);
+      setResult(response);
     } catch (err) {
-      setError(`STT: ${(err as Error).message}`);
+      setError(`${(err as Error).message}`);
       setPhase("error");
-      return;
-    }
-    if (!userText) {
-      setPhase("idle");
       return;
     }
 
-    setPhase("thinking");
-    let assistantText = "";
-    try {
-      const chat = await sendChat(userText, { profile: "smart", useMemory: true });
-      assistantText = chat.reply || "";
-      setReply(assistantText);
-    } catch (err) {
-      setError(`Chat: ${(err as Error).message}`);
-      setPhase("error");
-      return;
-    }
-    if (!assistantText) {
+    if (!response.reply) {
       setPhase("idle");
       return;
     }
 
     setPhase("speaking");
     try {
-      const audio = await synthesizeSpeech(assistantText.slice(0, 500));
-      const url = URL.createObjectURL(audio);
-      const player = new Audio(url);
+      const tone = response.fused_tone || "warm";
+      const audioUrl = await streamSpeech(response.reply.slice(0, 1000), { tone });
+      const player = new Audio(audioUrl);
       playerRef.current = player;
       player.onended = () => {
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(audioUrl);
         setPhase("idle");
       };
       player.onerror = () => {
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(audioUrl);
         setPhase("idle");
       };
       await player.play();
     } catch (err) {
-      // TTS опциональный — если нет YANDEX_API_KEY, просто показываем текст
-      setError(`TTS недоступен (${(err as Error).message}). Ответ показан текстом.`);
+      setError(`TTS: ${(err as Error).message}`);
       setPhase("idle");
     }
   }
@@ -189,23 +162,22 @@ export function VoiceRecorder({ onTranscript }: Props) {
     }
     setOpen(false);
     setPhase("idle");
-    setTranscript("");
-    setReply("");
+    setResult(null);
     setError(null);
   }
 
   useEffect(() => () => close(), []);
 
-  const phaseLabel = {
+  const phaseLabel: Record<Phase, string> = {
     idle: "Нажми и говори",
     recording: "Слушаю…",
-    transcribing: "Распознаю…",
-    thinking: "Думаю…",
+    processing: "Думаю…",
     speaking: "Говорю…",
     error: "Ошибка"
-  }[phase];
+  };
 
   const isRecording = phase === "recording";
+  const isBusy = phase === "processing" || phase === "speaking";
 
   return (
     <>
@@ -226,7 +198,7 @@ export function VoiceRecorder({ onTranscript }: Props) {
             exit={{ opacity: 0 }}
           >
             <motion.div
-              className="glass-strong relative w-full max-w-md p-8 text-center"
+              className="glass-strong relative w-full max-w-md p-6 sm:p-8"
               initial={{ scale: 0.94, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.94, opacity: 0 }}
@@ -240,10 +212,23 @@ export function VoiceRecorder({ onTranscript }: Props) {
                 <X className="h-5 w-5" />
               </button>
 
-              <div className="mb-2 flex items-center justify-center gap-2 text-sm text-slate-300">
-                {phase === "speaking" && <Volume2 className="h-4 w-4 animate-pulse text-neon-cyan" />}
-                <span>{phaseLabel}</span>
+              <div className="mb-3 flex items-center justify-center gap-2 text-sm text-slate-300">
+                {phase === "speaking" && (
+                  <Volume2 className="h-4 w-4 animate-pulse text-neon-cyan" />
+                )}
+                <span>{phaseLabel[phase]}</span>
               </div>
+
+              {/* Эмоция в процессе/после */}
+              {result?.fused_emotion && (
+                <div className="mb-4 flex justify-center">
+                  <EmotionBadge
+                    emotion={result.fused_emotion}
+                    intensity={result.voice_emotion?.intensity ?? result.text_emotion?.intensity}
+                    source={result.voice_emotion ? "voice" : "text"}
+                  />
+                </div>
+              )}
 
               <div className="mx-auto mb-4 flex h-24 w-full max-w-xs items-end justify-center gap-[3px]">
                 {level.map((v, i) => (
@@ -262,7 +247,7 @@ export function VoiceRecorder({ onTranscript }: Props) {
                     : "bg-gradient-to-br from-neon-cyan via-neon-violet to-neon-pink shadow-neon"
                 }`}
                 onClick={isRecording ? stopRecording : startRecording}
-                disabled={phase === "transcribing" || phase === "thinking" || phase === "speaking"}
+                disabled={isBusy}
                 aria-label={isRecording ? "Остановить" : "Начать запись"}
               >
                 {isRecording ? (
@@ -272,17 +257,35 @@ export function VoiceRecorder({ onTranscript }: Props) {
                 )}
               </button>
 
-              {transcript && (
+              {result?.transcript && (
                 <div className="mt-4 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left text-xs text-slate-200">
-                  <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">Ты</div>
-                  {transcript}
+                  <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">
+                    Ты ({result.transcript_provider})
+                  </div>
+                  {result.transcript}
                 </div>
               )}
 
-              {reply && (
+              {result?.reply && (
                 <div className="mt-2 rounded-xl border border-neon-violet/30 bg-neon-violet/10 px-3 py-2 text-left text-xs text-slate-100">
-                  <div className="mb-1 text-[10px] uppercase tracking-wider text-neon-violet">Фреди</div>
-                  {reply}
+                  <div className="mb-1 text-[10px] uppercase tracking-wider text-neon-violet">
+                    Фреди ({result.reply_model})
+                  </div>
+                  {result.reply}
+                </div>
+              )}
+
+              {/* Top-3 эмоций по голосу — для wow-эффекта */}
+              {result?.voice_emotion?.top_5 && result.voice_emotion.top_5.length > 0 && (
+                <div className="mt-3 flex flex-wrap justify-center gap-1">
+                  {result.voice_emotion.top_5.slice(0, 3).map((e) => (
+                    <EmotionBadge
+                      key={e.raw}
+                      emotion={e.name}
+                      intensity={Math.round(e.score * 10)}
+                      className="text-[10px]"
+                    />
+                  ))}
                 </div>
               )}
 
