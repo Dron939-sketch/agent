@@ -7,7 +7,9 @@
 #   3. После создания задай секретные env (помечены `sync: false`)
 #      в Settings → Environment.
 #
-# Backend `agent` уже создан вручную — этот блок описан для воспроизводимости.
+# Env vars сгруппированы по ролям. Всё, что `sync: false`, заполняется
+# вручную в Dashboard. Всё, что опционально — можно оставить пустым,
+# код gracefully деградирует.
 
 services:
   # ============ Backend API ============
@@ -15,11 +17,12 @@ services:
     name: agent
     runtime: docker
     plan: free
-    branch: claude/analyze-agent-repo-z8XBp
+    branch: main
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      # --- Core ---
       - key: ENVIRONMENT
         value: production
       - key: LOG_LEVEL
@@ -28,39 +31,130 @@ services:
         value: "10000"
       - key: SECRET_KEY
         generateValue: true
-      - key: DEEPSEEK_API_KEY
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agent-db
+          property: connectionString
+      - key: SELF_PUBLIC_URL
+        value: https://agent-ynlg.onrender.com
+      - key: SENTRY_DSN
         sync: false
+
+      # --- LLM providers (at least one required) ---
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: OLLAMA_BASE_URL
+        sync: false  # опционально: http://host:11434 для локального fallback
+
+      # --- Voice: STT (Deepgram) ---
       - key: DEEPGRAM_API_KEY
         sync: false
+
+      # --- Voice: TTS (Yandex madirus + optional ElevenLabs) ---
       - key: YANDEX_API_KEY
         sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_VOICE_ID
+        sync: false
+      - key: ELEVENLABS_MODEL
+        sync: false
+
+      # --- Voice emotion (Hume AI) ---
+      - key: HUME_API_KEY
+        sync: false
+
+      # --- Image generation (Replicate FLUX) ---
+      - key: REPLICATE_API_TOKEN
+        sync: false
+
+      # --- Tools ---
       - key: OPENWEATHER_API_KEY
         sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPO
+        sync: false
+
+      # --- Push notifications (VAPID) ---
       - key: VAPID_PRIVATE_KEY
         sync: false
       - key: VAPID_PUBLIC_KEY
         sync: false
       - key: VAPID_SUBJECT
         value: mailto:admin@freddy.local
+
+      # --- VAD ---
       - key: VAD_MODE
         value: webrtc
-      - key: SENTRY_DSN
+
+      # --- Integrations (all optional; plugin disabled if empty) ---
+      # Telegram bot
+      - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: DATABASE_URL
-        fromDatabase:
-          name: agent-db
-          property: connectionString
+
+      # Spotify (music_play / music_pause / ...)
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: SPOTIFY_REFRESH_TOKEN
+        sync: false
+
+      # Notion
+      - key: NOTION_API_KEY
+        sync: false
+      - key: NOTION_DEFAULT_PAGE_ID
+        sync: false
+
+      # Google Calendar (service account JSON)
+      - key: GOOGLE_CALENDAR_CREDENTIALS_JSON
+        sync: false
+      - key: GOOGLE_CALENDAR_ID
+        sync: false
+
+      # Email (IMAP + SMTP)
+      - key: EMAIL_ADDRESS
+        sync: false
+      - key: EMAIL_PASSWORD
+        sync: false
+      - key: EMAIL_IMAP_HOST
+        sync: false
+      - key: EMAIL_IMAP_PORT
+        sync: false
+      - key: EMAIL_SMTP_HOST
+        sync: false
+      - key: EMAIL_SMTP_PORT
+        sync: false
+
+      # Home Assistant
+      - key: HASS_URL
+        sync: false
+      - key: HASS_TOKEN
+        sync: false
+
+      # Vector store (optional — defaults to SQL-backed store)
+      - key: QDRANT_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+
+      # CORS (optional extra origins, comma-separated)
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
 
   # ============ Frontend (Next.js 14) ============
   - type: web
     name: agent-frontend
     runtime: docker
     plan: free
-    branch: claude/analyze-agent-repo-z8XBp
+    branch: main
     dockerfilePath: ./frontend/Dockerfile
     dockerContext: ./frontend
     healthCheckPath: /
