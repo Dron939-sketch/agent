@@ -1,4 +1,8 @@
-"""Chat-роуты с памятью, эмоциями, intents, KB и SSE-стримом."""
+"""Chat-роуты с памятью, эмоциями, intents, KB, tool-use и SSE-стримом.
+
+Sprint 4: для smart-профиля (Claude) теперь используется native tool-use —
+Фреди реально вызывает web_search/calculator/now/fetch_url когда уместно.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import AuthenticatedUser
+from app.core.config import Config
 from app.core.logging import get_logger
 from app.db import ConversationRepository, EmotionRepository
 from app.services import ChatMessage, default_router
@@ -18,6 +23,7 @@ from app.services.context import ContextAggregator
 from app.services.emotion import EmotionService
 from app.services.intents import detect_intent
 from app.services.knowledge import freddy_persona
+from app.services.llm.tooluse import ToolUseChat
 from app.services.memory import MemoryRecord, default_memory
 from app.services.memory.extractor import extract_facts
 
@@ -45,6 +51,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     profile: str = Field(default="smart")
     use_memory: bool = True
+    use_tools: bool = True
 
 
 class ChatMessageOut(BaseModel):
@@ -61,6 +68,7 @@ class ChatResponseOut(BaseModel):
     recalled: list[str] = Field(default_factory=list)
     intent: str | None = None
     message_id: int | None = None
+    used_tools: bool = False
 
 
 def _ctx_messages(
@@ -115,7 +123,6 @@ async def _store_chat_memory(user_id: str, user_msg: str, assistant_msg: str) ->
 
 
 async def _handle_intent(user_id: str, intent_type: str, payload: str) -> str | None:
-    """Возвращает текст-ответ для известных intent'ов или None если не обработали."""
     store = default_memory()
     if intent_type == "forget":
         if not payload:
@@ -159,6 +166,39 @@ async def _handle_intent(user_id: str, intent_type: str, payload: str) -> str | 
     return None
 
 
+async def _try_tool_use_chat(
+    system_text: str,
+    history_rows: list[dict],
+    user_message: str,
+) -> tuple[str | None, bool]:
+    """Пробует Anthropic native tool-use. Возвращает (reply, used).
+
+    Если ANTHROPIC_API_KEY не задан или ответ пустой → (None, False).
+    Тогда вызывающий код откатывается к обычному default_router().chat().
+    """
+    if not Config.ANTHROPIC_API_KEY:
+        return None, False
+
+    tool_chat = ToolUseChat()
+    if not tool_chat.is_available():
+        return None, False
+
+    # Anthropic ожидает {role, content} с user/assistant only
+    msgs: list[dict] = []
+    for m in history_rows:
+        if m["role"] in ("user", "assistant"):
+            msgs.append({"role": m["role"], "content": m["content"]})
+    msgs.append({"role": "user", "content": user_message})
+
+    try:
+        reply = await tool_chat.chat(system_text, msgs, max_tokens=1500, temperature=0.7)
+    except Exception as exc:
+        logger.warning("tool-use chat failed: %s", exc)
+        return None, False
+
+    return (reply, True) if reply else (None, False)
+
+
 @router.get("/history", response_model=list[ChatMessageOut])
 async def history(
     limit: int = 50,
@@ -179,7 +219,6 @@ async def send(
     convos = ConversationRepository(session)
     await convos.add(user.user_id, "user", body.message)
 
-    # Сначала проверяем явный intent — это бесплатно и моментально
     intent = detect_intent(body.message)
     if intent.type != "none":
         intent_reply = await _handle_intent(user.user_id, intent.type, intent.payload)
@@ -210,13 +249,31 @@ async def send(
             logger.warning("emotion log failed: %s", exc)
 
     history_rows = full_ctx.history[:-1] if full_ctx.history else []
-    messages = _ctx_messages(_base_system(), full_ctx, history_rows, body.message)
+    system_text = ContextAggregator.format_for_prompt(full_ctx, _base_system())
 
-    response = await default_router().chat(messages, profile=body.profile)  # type: ignore[arg-type]
-    msg_id = await convos.add(user.user_id, "assistant", response.text)
+    used_tools = False
+    response_text: str | None = None
+    response_model = "router"
+
+    # Sprint 4: для smart-профиля сначала пробуем native tool-use (Claude умеет)
+    if body.profile == "smart" and body.use_tools:
+        response_text, used_tools = await _try_tool_use_chat(
+            system_text, history_rows, body.message
+        )
+        if response_text:
+            response_model = "claude-sonnet-4-6+tools"
+
+    # Fallback на обычный LLMRouter
+    if not response_text:
+        messages = _ctx_messages(_base_system(), full_ctx, history_rows, body.message)
+        router_response = await default_router().chat(messages, profile=body.profile)  # type: ignore[arg-type]
+        response_text = router_response.text
+        response_model = router_response.model
+
+    msg_id = await convos.add(user.user_id, "assistant", response_text)
 
     if body.use_memory:
-        background.add_task(_store_chat_memory, user.user_id, body.message, response.text)
+        background.add_task(_store_chat_memory, user.user_id, body.message, response_text)
     background.add_task(
         _extract_facts_bg,
         user.user_id,
@@ -224,12 +281,13 @@ async def send(
     )
 
     return ChatResponseOut(
-        reply=response.text,
-        model=response.model,
+        reply=response_text,
+        model=response_model,
         emotion=full_ctx.emotion.primary if full_ctx.emotion else None,
         tone=full_ctx.emotion.tone if full_ctx.emotion else None,
         recalled=full_ctx.recalled,
         message_id=msg_id,
+        used_tools=used_tools,
     )
 
 
@@ -243,7 +301,6 @@ async def stream(
     convos = ConversationRepository(session)
     await convos.add(user.user_id, "user", body.message)
 
-    # Intent shortcut: если это команда — отдаём готовый ответ одним чанком
     intent = detect_intent(body.message)
     intent_reply: str | None = None
     if intent.type != "none":
