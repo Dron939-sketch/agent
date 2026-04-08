@@ -77,7 +77,14 @@ export function resolveApiUrl(): string {
   return "http://localhost:8000";
 }
 
-const API = resolveApiUrl();
+// `API` резолвится лениво через геттер-функцию: никакого module-init side
+// effect-а, никаких TDZ на chunk split'ах. Все функции ниже используют
+// apiBase() вместо top-level const API = resolveApiUrl().
+let _apiBaseCache: string | null = null;
+function apiBase(): string {
+  if (_apiBaseCache === null) _apiBaseCache = resolveApiUrl();
+  return _apiBaseCache;
+}
 
 function authHeaders(): HeadersInit {
   if (typeof window === "undefined") return {};
@@ -103,7 +110,7 @@ export async function sendChat(
   tone?: string;
   message_id?: number;
 }> {
-  const res = await fetch(`${API}/api/chat/`, {
+  const res = await fetch(`${apiBase()}/api/chat/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({
@@ -128,7 +135,7 @@ export async function streamChatEvents(
   onEvent: (evt: StreamEvent) => void,
   opts: { profile?: string; useMemory?: boolean } = {}
 ): Promise<void> {
-  const res = await fetch(`${API}/api/chat/stream`, {
+  const res = await fetch(`${apiBase()}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({
@@ -197,7 +204,8 @@ export function openAgentSocket(
     onEvent({ type: "error", message: "missing auth token" });
     return null;
   }
-  const wsBase = API.startsWith("https") ? API.replace("https", "wss") : API.replace("http", "ws");
+  const base = apiBase();
+  const wsBase = base.startsWith("https") ? base.replace("https", "wss") : base.replace("http", "ws");
   const ws = new WebSocket(`${wsBase}/api/agents/ws?token=${encodeURIComponent(token)}`);
   ws.onopen = () => ws.send(JSON.stringify(payload));
   ws.onmessage = (ev) => {
@@ -216,7 +224,7 @@ export function openAgentSocket(
 export async function transcribeAudio(audio: Blob): Promise<{ text: string; provider: string }> {
   const fd = new FormData();
   fd.append("audio", audio, "voice.webm");
-  const res = await fetch(`${API}/api/voice/stt`, {
+  const res = await fetch(`${apiBase()}/api/voice/stt`, {
     method: "POST",
     headers: { ...authHeaders() },
     body: fd
@@ -226,7 +234,7 @@ export async function transcribeAudio(audio: Blob): Promise<{ text: string; prov
 }
 
 export async function listVoices(): Promise<VoiceInfo[]> {
-  const res = await fetch(`${API}/api/voice/voices`);
+  const res = await fetch(`${apiBase()}/api/voice/voices`);
   if (!res.ok) throw new Error(`voices ${res.status}`);
   return res.json();
 }
@@ -235,7 +243,7 @@ export async function synthesizeSpeech(
   text: string,
   opts: { voice?: string; tone?: string; prefer?: "auto" | "elevenlabs" | "yandex" } = {}
 ): Promise<Blob> {
-  const res = await fetch(`${API}/api/voice/tts`, {
+  const res = await fetch(`${apiBase()}/api/voice/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({
@@ -253,7 +261,7 @@ export async function streamSpeech(
   text: string,
   opts: { voice?: string; tone?: string } = {}
 ): Promise<string> {
-  const res = await fetch(`${API}/api/voice/tts/stream`, {
+  const res = await fetch(`${apiBase()}/api/voice/tts/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({
@@ -273,7 +281,7 @@ export async function streamSpeech(
 export async function voiceFullLoop(audio: Blob): Promise<FullLoopResponse> {
   const fd = new FormData();
   fd.append("audio", audio, "voice.webm");
-  const res = await fetch(`${API}/api/voice/full-loop`, {
+  const res = await fetch(`${apiBase()}/api/voice/full-loop`, {
     method: "POST",
     headers: { ...authHeaders() },
     body: fd
@@ -291,7 +299,7 @@ export async function analyzeImage(
   const fd = new FormData();
   fd.append("image", image, "image.png");
   fd.append("question", question);
-  const res = await fetch(`${API}/api/vision/analyze`, {
+  const res = await fetch(`${apiBase()}/api/vision/analyze`, {
     method: "POST",
     headers: { ...authHeaders() },
     body: fd
@@ -304,7 +312,7 @@ export async function generateImage(
   prompt: string,
   opts: { aspectRatio?: string; numOutputs?: number } = {}
 ): Promise<{ urls: string[]; provider: string; prompt: string }> {
-  const res = await fetch(`${API}/api/vision/generate`, {
+  const res = await fetch(`${apiBase()}/api/vision/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({
@@ -320,14 +328,14 @@ export async function generateImage(
 // === Push ===
 
 export async function getVapidPublicKey(): Promise<string> {
-  const res = await fetch(`${API}/api/push/public-key`);
+  const res = await fetch(`${apiBase()}/api/push/public-key`);
   if (!res.ok) throw new Error(`vapid ${res.status}`);
   const data = (await res.json()) as { key: string };
   return data.key;
 }
 
 export async function subscribePush(subscription: PushSubscriptionJSON): Promise<void> {
-  const res = await fetch(`${API}/api/push/subscribe`, {
+  const res = await fetch(`${apiBase()}/api/push/subscribe`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(subscription)
@@ -342,7 +350,7 @@ export async function sendFeedback(
   messageId?: number,
   note?: string
 ): Promise<{ id: number }> {
-  const res = await fetch(`${API}/api/feedback/`, {
+  const res = await fetch(`${apiBase()}/api/feedback/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ score, message_id: messageId ?? null, note: note ?? null })
@@ -354,7 +362,7 @@ export async function sendFeedback(
 // === Auth ===
 
 export async function login(username: string, password: string): Promise<void> {
-  const res = await fetch(`${API}/api/auth/login`, {
+  const res = await fetch(`${apiBase()}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password })
@@ -366,7 +374,7 @@ export async function login(username: string, password: string): Promise<void> {
 
 export async function ping(): Promise<boolean> {
   try {
-    const res = await fetch(`${API}/health`, { cache: "no-store" });
+    const res = await fetch(`${apiBase()}/health`, { cache: "no-store" });
     return res.ok;
   } catch {
     return false;
@@ -374,7 +382,7 @@ export async function ping(): Promise<boolean> {
 }
 
 export async function getIntegrations(): Promise<Record<string, unknown>> {
-  const res = await fetch(`${API}/integrations`);
+  const res = await fetch(`${apiBase()}/integrations`);
   if (!res.ok) throw new Error(`integrations ${res.status}`);
   return res.json();
 }
@@ -394,7 +402,7 @@ export async function createReminder(
   text: string,
   tzOffset = 3
 ): Promise<ReminderInfo> {
-  const res = await fetch(`${API}/api/reminders`, {
+  const res = await fetch(`${apiBase()}/api/reminders`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ text, tz_offset: tzOffset })
@@ -404,7 +412,7 @@ export async function createReminder(
 }
 
 export async function listReminders(): Promise<{ reminders: ReminderInfo[]; count: number }> {
-  const res = await fetch(`${API}/api/reminders`, {
+  const res = await fetch(`${apiBase()}/api/reminders`, {
     headers: { ...authHeaders() }
   });
   if (!res.ok) throw new Error(`reminders ${res.status}`);
@@ -428,7 +436,8 @@ export function openTriggerSocket(
 ): WebSocket | null {
   const token = getToken();
   if (!token) return null;
-  const wsBase = API.startsWith("https") ? API.replace("https", "wss") : API.replace("http", "ws");
+  const base = apiBase();
+  const wsBase = base.startsWith("https") ? base.replace("https", "wss") : base.replace("http", "ws");
   const ws = new WebSocket(`${wsBase}/api/triggers/ws?token=${encodeURIComponent(token)}`);
   ws.onmessage = (ev) => {
     try {
