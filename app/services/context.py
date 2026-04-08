@@ -16,6 +16,7 @@ from app.core.logging import get_logger
 from app.db import (
     ConversationRepository,
     EmotionRepository,
+    KnowledgeRepository,
     UserRepository,
 )
 from app.services.emotion import EmotionResult, EmotionService
@@ -29,6 +30,7 @@ logger = get_logger(__name__)
 class FullContext:
     profile_prompt: str = ""
     recalled: list[str] = field(default_factory=list)
+    knowledge_prompt: str = ""  # Sprint 7: граф знаний
     emotion: EmotionResult | None = None
     emotion_trend: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
@@ -89,6 +91,14 @@ class ContextAggregator:
             logger.warning("memory recall failed: %s", exc)
             ctx.recalled = []
 
+        # 6. Sprint 7: Граф знаний
+        try:
+            knowledge_repo = KnowledgeRepository(self.session)
+            ctx.knowledge_prompt = await knowledge_repo.format_knowledge_for_prompt(user_id)
+        except Exception as exc:
+            logger.warning("knowledge graph failed: %s", exc)
+            ctx.knowledge_prompt = ""
+
         return ctx
 
     @staticmethod
@@ -113,6 +123,9 @@ class ContextAggregator:
             parts.append("(эмоциональное состояние нестабильно — будь внимателен и мягок)")
         elif trend.get("trend") == "stable" and trend.get("emotion"):
             parts.append(f"(эмоциональное состояние стабильно: {trend['emotion']})")
+
+        if ctx.knowledge_prompt:
+            parts.append(ctx.knowledge_prompt)
 
         if ctx.recalled:
             memo = "\n".join(f"- {t}" for t in ctx.recalled)

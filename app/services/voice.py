@@ -21,12 +21,20 @@ YANDEX_STT_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 YANDEX_TTS_URL = "https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize"
 
 # === Каталог голосов Yandex SpeechKit ===
+# Примечание: "jarvis" — пресет с голосом filipp в стиле Джарвиса из рус. дубляжа
+# (Алексей Колган): спокойный, размеренный, чуть холодный, без лишних эмоций).
 YANDEX_VOICES = {
     "madirus": {
         "label": "Madirus (сербский баритон, ~Бикович)",
         "gender": "male",
         "accent": "serbian",
         "default": True,
+    },
+    "jarvis": {
+        "label": "Джарвис (рус. дубляж, ~Колган)",
+        "gender": "male",
+        "accent": "russian",
+        "yandex_voice": "filipp",  # Mapping: jarvis → filipp с настройками
     },
     "filipp": {"label": "Филипп (спокойный)", "gender": "male"},
     "ermil": {"label": "Ермил (выразительный)", "gender": "male"},
@@ -36,6 +44,14 @@ YANDEX_VOICES = {
     "oksana": {"label": "Оксана (тёплый)", "gender": "female"},
     "alyss": {"label": "Алисса (молодой)", "gender": "female"},
     "omazh": {"label": "Омаж (мягкий)", "gender": "female"},
+}
+
+# Специальные настройки для пресета "jarvis"
+# Стиль Алексея Колгана: спокойный, чёткий, нейтральная эмоция, чуть замедленная речь.
+JARVIS_SETTINGS = {
+    "yandex_voice": "filipp",
+    "emotion": "neutral",
+    "speed_multiplier": 0.95,  # Чуть медленнее — более «AI-ассистентский»
 }
 
 # Глобальный множитель скорости речи. 1.10 = +10% (быстрее).
@@ -161,12 +177,18 @@ class YandexSpeechKit:
             tone, ("neutral", round(1.0 * SPEED_BOOST, 3))
         )
 
-        if voice == "madirus":
+        # Пресет "jarvis": маппим на filipp с нейтральной эмоцией и чуть замедленной речью
+        actual_voice = voice
+        if voice == "jarvis":
+            actual_voice = JARVIS_SETTINGS["yandex_voice"]
+            emotion = JARVIS_SETTINGS["emotion"]
+            speed = round(speed * JARVIS_SETTINGS["speed_multiplier"], 3)
+        elif voice == "madirus":
             emotion = "neutral"
 
         headers = {"Authorization": f"Api-Key {self.api_key}"}
         data: dict[str, str] = {
-            "voice": voice,
+            "voice": actual_voice,
             "emotion": emotion,
             "speed": str(speed),
             "format": "oggopus",

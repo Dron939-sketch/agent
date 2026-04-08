@@ -11,6 +11,7 @@ from .models import (
     Goal,
     Habit,
     HabitCheck,
+    KnowledgeFact,
     Log,
     Memory,
     PushSubscription,
@@ -18,6 +19,7 @@ from .models import (
     Session,
     Task,
     User,
+    UserInsight,
 )
 from .repositories import (
     BackupRepository,
@@ -31,6 +33,7 @@ from .repositories import (
     TaskRepository,
     UserRepository,
 )
+from .knowledge_repo import KnowledgeRepository
 from .session import dispose_db, get_engine, get_sessionmaker, init_db, session_scope
 
 __all__ = [
@@ -50,6 +53,9 @@ __all__ = [
     "Habit",
     "HabitCheck",
     "ChatSession",
+    "KnowledgeFact",
+    "UserInsight",
+    "KnowledgeRepository",
     "UserRepository",
     "SessionRepository",
     "ConversationRepository",

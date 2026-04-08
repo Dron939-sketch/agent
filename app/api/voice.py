@@ -339,7 +339,20 @@ async def full_loop(
         except Exception:
             pass
 
+    async def _auto_profile():
+        try:
+            from app.services.memory.knowledge_graph import auto_profile_after_dialogue
+
+            msgs = [
+                {"role": "user", "content": clean_transcript},
+                {"role": "assistant", "content": reply_text},
+            ]
+            await auto_profile_after_dialogue(user.user_id, msgs)
+        except Exception:
+            pass
+
     background.add_task(_store_memory)
+    background.add_task(_auto_profile)
 
     return FullLoopResponse(
         transcript=transcript,

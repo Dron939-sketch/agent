@@ -109,6 +109,16 @@ async def _extract_facts_bg(user_id: str, history: list[dict]) -> None:
     except Exception as exc:  # pragma: no cover
         logger.warning("background fact extraction failed: %s", exc)
 
+    # Sprint 7: auto-profile — extract structured knowledge triples
+    try:
+        from app.services.memory.knowledge_graph import auto_profile_after_dialogue
+
+        result = await auto_profile_after_dialogue(user_id, history[-FACT_EXTRACT_EVERY:])
+        if result.get("stored", 0) > 0:
+            logger.info("🧠 Knowledge graph: +%d triples for user=%s", result["stored"], user_id)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("knowledge graph extraction failed: %s", exc)
+
 
 async def _store_chat_memory(user_id: str, user_msg: str, assistant_msg: str) -> None:
     try:
