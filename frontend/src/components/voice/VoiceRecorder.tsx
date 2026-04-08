@@ -12,6 +12,7 @@ type Phase = "idle" | "recording" | "processing" | "speaking" | "error";
 
 export function VoiceRecorder() {
   const token = useSession((s) => s.token);
+  const voice = useSession((s) => s.voice);
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [level, setLevel] = useState<number[]>(new Array(48).fill(0));
@@ -134,7 +135,10 @@ export function VoiceRecorder() {
     setPhase("speaking");
     try {
       const tone = response.fused_tone || "warm";
-      const audioUrl = await streamSpeech(response.reply.slice(0, 1000), { tone });
+      const audioUrl = await streamSpeech(response.reply.slice(0, 1000), {
+        tone,
+        voice
+      });
       const player = new Audio(audioUrl);
       playerRef.current = player;
       player.onended = () => {
@@ -217,9 +221,9 @@ export function VoiceRecorder() {
                   <Volume2 className="h-4 w-4 animate-pulse text-neon-cyan" />
                 )}
                 <span>{phaseLabel[phase]}</span>
+                <span className="text-[10px] uppercase tracking-wider text-slate-500">· {voice}</span>
               </div>
 
-              {/* Эмоция в процессе/после */}
               {result?.fused_emotion && (
                 <div className="mb-4 flex justify-center">
                   <EmotionBadge
@@ -275,7 +279,6 @@ export function VoiceRecorder() {
                 </div>
               )}
 
-              {/* Top-3 эмоций по голосу — для wow-эффекта */}
               {result?.voice_emotion?.top_5 && result.voice_emotion.top_5.length > 0 && (
                 <div className="mt-3 flex flex-wrap justify-center gap-1">
                   {result.voice_emotion.top_5.slice(0, 3).map((e) => (
