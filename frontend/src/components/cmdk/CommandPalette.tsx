@@ -14,12 +14,14 @@ import {
   LogIn,
   LogOut,
   MessageSquare,
+  Mic,
   Sparkles,
   Volume2,
   VolumeX,
   Workflow
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { listVoices, type VoiceInfo } from "@/lib/api";
 import { useSession } from "@/store/session";
 
 function RenderResults() {
@@ -62,10 +64,17 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const setLocale = useSession((s) => s.setLocale);
   const voiceReply = useSession((s) => s.voiceReply);
   const setVoiceReply = useSession((s) => s.setVoiceReply);
+  const setVoice = useSession((s) => s.setVoice);
   const token = useSession((s) => s.token);
   const logout = useSession((s) => s.logout);
 
-  const actions = [
+  const [voices, setVoices] = useState<VoiceInfo[]>([]);
+
+  useEffect(() => {
+    listVoices().then(setVoices).catch(() => setVoices([]));
+  }, []);
+
+  const baseActions = [
     {
       id: "chat",
       name: "Чат · Chat",
@@ -117,8 +126,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
             keywords: "login auth signup",
             section: "Аккаунт",
             icon: <LogIn className="h-4 w-4 text-neon-pink" />,
-            perform: () =>
-              window.dispatchEvent(new CustomEvent("freddy:open-auth"))
+            perform: () => window.dispatchEvent(new CustomEvent("freddy:open-auth"))
           }
         ]),
     {
@@ -170,6 +178,17 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       perform: () => setLocale("en")
     }
   ];
+
+  const voiceActions = voices.map((v) => ({
+    id: `voice-${v.id}`,
+    name: `🎤 ${v.label}${v.default ? " (рекомендую)" : ""}`,
+    keywords: `voice ${v.id} ${v.label} ${v.gender ?? ""} ${v.accent ?? ""}`,
+    section: "Выбор голоса",
+    icon: <Mic className="h-4 w-4 text-neon-cyan" />,
+    perform: () => setVoice(v.id)
+  }));
+
+  const actions = [...baseActions, ...voiceActions];
 
   return (
     <KBarProvider actions={actions}>
