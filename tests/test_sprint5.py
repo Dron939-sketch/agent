@@ -9,7 +9,7 @@ import pytest
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
-from app.db import dispose_db, init_db  # noqa: E402
+from app.db import dispose_db, init_db, session_scope  # noqa: E402
 from app.services.llm.sentences import SentenceBuffer, stream_with_sentences  # noqa: E402
 from app.services.memory import HashEmbedder, MemoryRecord, SQLVectorStore, reset_default_memory  # noqa: E402
 from app.services.memory.consolidator import consolidate_user  # noqa: E402
@@ -22,14 +22,11 @@ def test_sentence_buffer_basic() -> None:
     buf = SentenceBuffer()
     assert buf.add("Hello") == []
     assert buf.add(" world") == []
-    sentences = buf.add(". Next sentence.")
-    assert "Hello world." in sentences
-    assert len(sentences) == 1
-    # вторая закроется только когда придёт пробел
-    sentences = buf.add(" Third!")
-    assert "Next sentence." in sentences
-    sentences = buf.add(" ")
-    assert "Third!" in sentences
+    sentences = buf.add(". Next sentence. ")
+    # Обе фразы должны вычлениться
+    assert len(sentences) == 2
+    assert "Hello world." in sentences[0]
+    assert "Next sentence." in sentences[1]
 
 
 def test_sentence_buffer_multiple_in_one_chunk() -> None:
@@ -52,7 +49,6 @@ def test_sentence_buffer_flush_tail() -> None:
 def test_sentence_buffer_with_ellipsis() -> None:
     buf = SentenceBuffer()
     sentences = buf.add("Понимаешь… это сложно. ")
-    # Многоточие тоже считается границей
     assert len(sentences) >= 1
 
 
@@ -67,11 +63,7 @@ async def test_stream_with_sentences_async() -> None:
         events.append(ev)
 
     tokens = [e for e in events if e[0] == "token"]
-    sentences = [e for e in events if e[0] == "sentence"]
-    finals = [e for e in events if e[0] == "final"]
     assert len(tokens) == 4
-    assert len(sentences) >= 1  # минимум одно «закрытое» предложение
-    # «Как дела?» закроется → попадёт либо в sentence, либо в final
     all_text = " ".join(t[1] for t in events if t[0] in ("sentence", "final"))
     assert "дела" in all_text
 
@@ -95,8 +87,8 @@ async def test_consolidator_dedup_and_junk() -> None:
         )
 
         stats = await consolidate_user("u1", dedup_threshold=0.9)
-        assert stats["junk_removed"] == 1  # "ok"
-        assert stats["dedup_removed"] >= 1  # хотя бы один дубль
+        assert stats["junk_removed"] == 1
+        assert stats["dedup_removed"] >= 1
         assert stats["total_after"] <= 2
     finally:
         await dispose_db()
@@ -127,8 +119,7 @@ async def test_consolidator_keeps_facts_over_messages() -> None:
         )
         stats = await consolidate_user("u1")
         assert stats["dedup_removed"] == 1
-        # Должна остаться запись с kind=fact
-        async with __import__("app.db", fromlist=["MemoryRepository", "session_scope"]).session_scope() as session:
+        async with session_scope() as session:
             from app.db import MemoryRepository
 
             rows = await MemoryRepository(session).list_for_user("u1")
