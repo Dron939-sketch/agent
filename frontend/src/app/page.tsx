@@ -7,7 +7,6 @@ import { ChatPanel } from "@/components/chat/ChatPanel";
 import { AgentTimeline } from "@/components/timeline/AgentTimeline";
 import { DashboardTiles } from "@/components/dashboard/DashboardTiles";
 import { MoodGraph } from "@/components/dashboard/MoodGraph";
-import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
 
 const FreddyAvatar = dynamic(
   () => import("@/components/avatar/FreddyAvatar").then((m) => m.FreddyAvatar),
@@ -31,6 +30,15 @@ const KnowledgeGraph = dynamic(
 );
 const HeaderAuth = dynamic(
   () => import("@/components/layout/HeaderAuth").then((m) => m.HeaderAuth),
+  { ssr: false }
+);
+// VoiceRecorder зависит от window (SpeechRecognition check в
+// isWakeWordSupported) и от persisted alwaysListening. Без ssr:false
+// wake-word FAB-кнопка не появляется на первом рендере (на сервере
+// window undefined → wakeSupported=false), и overlay VoiceWakeMode
+// тоже не монтируется.
+const VoiceRecorder = dynamic(
+  () => import("@/components/voice/VoiceRecorder").then((m) => m.VoiceRecorder),
   { ssr: false }
 );
 
