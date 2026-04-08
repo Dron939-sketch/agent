@@ -13,8 +13,8 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Ear, Mic, MicOff, Volume2, X, Radio } from "lucide-react";
-import { streamSpeech, voiceFullLoop, type FullLoopResponse } from "@/lib/api";
+import { Ear, Mic, MicOff, Volume2, X, Radio, Bell } from "lucide-react";
+import { streamSpeech, voiceFullLoop, openTriggerSocket, type FullLoopResponse, type TriggerEvent } from "@/lib/api";
 import { useSession } from "@/store/session";
 import { SilenceDetector } from "@/lib/vad";
 import { WakeWordDetector, isWakeWordSupported, type WakeWordStatus } from "@/lib/wakeword";
@@ -34,8 +34,10 @@ export function VoiceWakeMode() {
   const [result, setResult] = useState<FullLoopResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [supported] = useState(() => isWakeWordSupported());
+  const [notification, setNotification] = useState<TriggerEvent | null>(null);
 
   const wakeRef = useRef<WakeWordDetector | null>(null);
+  const triggerWsRef = useRef<WebSocket | null>(null);
   const mediaRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -64,6 +66,10 @@ export function VoiceWakeMode() {
     cleanupRecording();
     wakeRef.current?.stop();
     wakeRef.current = null;
+    if (triggerWsRef.current) {
+      try { triggerWsRef.current.close(); } catch {}
+      triggerWsRef.current = null;
+    }
     if (playerRef.current) {
       try { playerRef.current.pause(); } catch {}
       playerRef.current = null;
@@ -205,7 +211,47 @@ export function VoiceWakeMode() {
     startRecording();
   }, [startRecording]);
 
-  // --- Initialize / teardown wake word detector ---
+  // --- Speak a proactive notification aloud ---
+
+  const speakNotification = useCallback(async (message: string) => {
+    if (phase !== "listening") return; // Don't interrupt active dialogue
+    wakeRef.current?.pause();
+    setPhase("speaking");
+    try {
+      const audioUrl = await streamSpeech(message.slice(0, 500), { tone: "warm", voice });
+      const player = new Audio(audioUrl);
+      playerRef.current = player;
+      player.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        playerRef.current = null;
+        setNotification(null);
+        returnToListening();
+      };
+      player.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
+        playerRef.current = null;
+        setNotification(null);
+        returnToListening();
+      };
+      await player.play();
+    } catch {
+      setNotification(null);
+      returnToListening();
+    }
+  }, [phase, voice, returnToListening]);
+
+  // --- Handle incoming trigger events ---
+
+  const handleTriggerEvent = useCallback((evt: TriggerEvent) => {
+    if (evt.type !== "trigger" || !evt.message) return;
+    setNotification(evt);
+    // Speak HIGH/CRITICAL priority notifications aloud
+    if (evt.priority === "HIGH" || evt.priority === "CRITICAL") {
+      speakNotification(evt.message);
+    }
+  }, [speakNotification]);
+
+  // --- Initialize / teardown wake word detector + trigger WebSocket ---
 
   useEffect(() => {
     if (!alwaysListening || !supported) {
@@ -222,13 +268,23 @@ export function VoiceWakeMode() {
     wakeRef.current = detector;
     detector.start();
 
+    // Connect to trigger WebSocket for proactive notifications
+    const ws = openTriggerSocket(handleTriggerEvent, () => {
+      triggerWsRef.current = null;
+    });
+    triggerWsRef.current = ws;
+
     setPhase("listening");
 
     return () => {
       detector.stop();
       wakeRef.current = null;
+      if (triggerWsRef.current) {
+        try { triggerWsRef.current.close(); } catch {}
+        triggerWsRef.current = null;
+      }
     };
-  }, [alwaysListening, supported, onWakeDetected]);
+  }, [alwaysListening, supported, onWakeDetected, handleTriggerEvent]);
 
   // Cleanup on unmount
   useEffect(() => () => cleanupAll(), [cleanupAll]);
@@ -399,6 +455,22 @@ export function VoiceWakeMode() {
                 className="text-[10px]"
               />
             ))}
+          </div>
+        )}
+
+        {/* Proactive notification */}
+        {notification && notification.message && (
+          <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-left text-xs text-amber-100">
+            <div className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wider text-amber-400">
+              <Bell className="h-3 w-3" />
+              <span>{notification.source || "trigger"}</span>
+              {notification.priority && (
+                <span className="ml-auto rounded bg-amber-500/20 px-1 text-amber-300">
+                  {notification.priority}
+                </span>
+              )}
+            </div>
+            {notification.message}
           </div>
         )}
 

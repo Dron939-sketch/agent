@@ -24,6 +24,7 @@ from . import feedback as feedback_router
 from . import push as push_router
 from . import reminders as reminders_router
 from . import system as system_router
+from . import triggers as triggers_router
 from . import vision as vision_router
 from . import voice as voice_router
 
@@ -47,6 +48,14 @@ async def lifespan(_app: FastAPI):  # noqa: ANN201
     scheduler.register("reminder", manager.handle_reminder)
     await scheduler.start()
 
+    # Sprint 6: Start proactive trigger engine
+    from app.services.triggers import get_trigger_engine
+    from app.services.triggers.builtin import register_builtin_triggers
+
+    trigger_engine = get_trigger_engine()
+    register_builtin_triggers(trigger_engine)
+    await trigger_engine.start()
+
     autonomy = get_autonomy_loop()
     await autonomy.start()
 
@@ -61,6 +70,7 @@ async def lifespan(_app: FastAPI):  # noqa: ANN201
     try:
         yield
     finally:
+        await trigger_engine.stop()
         await scheduler.stop()
         await autonomy.stop()
         await dispose_db()
@@ -94,6 +104,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router.router)
     app.include_router(coach_router.router)
     app.include_router(reminders_router.router)
+    app.include_router(triggers_router.router)
 
     return app
 
