@@ -1,4 +1,4 @@
-"""Voice endpoints: STT, TTS (sync + stream), full-loop, semantic endpoint."""
+"""Voice endpoints: STT, TTS (sync + stream), full-loop, semantic endpoint, voice catalog."""
 
 from __future__ import annotations
 
@@ -29,6 +29,8 @@ router = APIRouter(prefix="/api/voice", tags=["voice"])
 
 _detector = SemanticEndpointDetector()
 
+DEFAULT_VOICE = "madirus"  # Сербский баритон, ~ Милош Бикович
+
 
 class STTResponse(BaseModel):
     text: str
@@ -37,7 +39,7 @@ class STTResponse(BaseModel):
 
 class TTSRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
-    voice: str = "jane"
+    voice: str = DEFAULT_VOICE
     tone: str = "warm"
     prefer: str = Field(default="auto", pattern="^(auto|elevenlabs|yandex)$")
 
@@ -66,6 +68,14 @@ class FullLoopResponse(BaseModel):
     audio_url: str | None = None
 
 
+class VoiceInfo(BaseModel):
+    id: str
+    label: str
+    gender: str | None = None
+    accent: str | None = None
+    default: bool = False
+
+
 def _service() -> VoiceService:
     return VoiceService()
 
@@ -75,6 +85,22 @@ def _base_system() -> str:
     if persona:
         return persona
     return "Ты Фреди, дружелюбный и всемогущий AI-помощник."
+
+
+@router.get("/voices", response_model=list[VoiceInfo])
+async def list_voices() -> list[VoiceInfo]:
+    """Каталог доступных голосов TTS."""
+    voices = _service().list_voices()
+    return [
+        VoiceInfo(
+            id=vid,
+            label=v.get("label", vid),
+            gender=v.get("gender"),
+            accent=v.get("accent"),
+            default=v.get("default", False),
+        )
+        for vid, v in voices.items()
+    ]
 
 
 @router.post("/stt", response_model=STTResponse)
@@ -102,7 +128,7 @@ async def text_to_speech(
     _user: AuthenticatedUser = Depends(get_current_user),
 ) -> Response:
     audio, provider = await _service().synthesize(
-        body.text, tone=body.tone, prefer=body.prefer
+        body.text, voice=body.voice, tone=body.tone, prefer=body.prefer
     )
     if not audio:
         raise HTTPException(
@@ -113,7 +139,10 @@ async def text_to_speech(
     return Response(
         content=audio,
         media_type=media,
-        headers={"X-TTS-Provider": provider},
+        headers={
+            "X-TTS-Provider": provider,
+            "X-TTS-Voice": body.voice,
+        },
     )
 
 
@@ -122,17 +151,19 @@ async def text_to_speech_stream(
     body: TTSRequest,
     _user: AuthenticatedUser = Depends(get_current_user),
 ) -> StreamingResponse:
-    """Streaming TTS — отдаёт MP3-чанки по мере генерации (только ElevenLabs)."""
+    """Streaming TTS — отдаёт chunks по мере генерации."""
     voice_service = _service()
 
     async def stream_audio() -> AsyncIterator[bytes]:
-        async for chunk in voice_service.synthesize_stream(body.text, tone=body.tone):
+        async for chunk in voice_service.synthesize_stream(
+            body.text, voice=body.voice, tone=body.tone
+        ):
             yield chunk
 
     return StreamingResponse(
         stream_audio(),
         media_type="audio/mpeg",
-        headers={"X-TTS-Provider": "elevenlabs"},
+        headers={"X-TTS-Voice": body.voice},
     )
 
 
@@ -157,22 +188,13 @@ async def full_loop(
     user: AuthenticatedUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> FullLoopResponse:
-    """Единый endpoint: audio → STT + voice emotion (parallel) → LLM → ответ.
-
-    Sprint 2: одна сетевая поездка вместо 4 (STT, emotion, chat, TTS).
-    Возвращает текст ответа + URL для streaming TTS (отдельный запрос).
-
-    Audio эмоция (Hume) и текст эмоция (regex) сливаются в `fused_emotion`:
-    - Если voice уверенно (confidence > 0.6) → берём voice
-    - Иначе → text
-    """
+    """Единый endpoint: audio → STT + voice emotion → fusion → LLM → ответ."""
     raw = await audio.read()
     if not raw:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty audio")
 
     voice_service = _service()
 
-    # 1. STT
     transcript, stt_provider = await voice_service.transcribe(
         raw, content_type=audio.content_type or "audio/webm"
     )
@@ -182,7 +204,6 @@ async def full_loop(
             "STT failed — no provider or empty result",
         )
 
-    # 2. Voice emotion (Hume) — параллельно с подготовкой контекста
     voice_emo: dict | None = None
     try:
         voice_emo = await voice_service.voice_emotion(
@@ -191,7 +212,6 @@ async def full_loop(
     except Exception as exc:
         logger.warning("voice emotion failed: %s", exc)
 
-    # 3. Intent shortcut
     intent = detect_intent(transcript)
     intent_reply: str | None = None
     if intent.type == "remember" and intent.payload:
@@ -214,7 +234,6 @@ async def full_loop(
             else f"Ничего такого в памяти не нашёл — {intent.payload}."
         )
 
-    # 4. Text emotion + контекст
     convos = ConversationRepository(session)
     await convos.add(user.user_id, "user", transcript)
 
@@ -223,14 +242,11 @@ async def full_loop(
     aggregator = ContextAggregator(session, emotion_service=emotion_service)
     full_ctx = await aggregator.get_full_context(user.user_id, transcript)
 
-    # 5. Fusion: voice > text если voice confidence > 0.6
     fused_primary = text_emo.primary
     fused_tone = text_emo.tone
     if voice_emo and voice_emo.get("confidence", 0) > 0.6:
         fused_primary = voice_emo["primary"]
-        # tone остаётся текстовый (он human-friendly)
 
-    # Логируем эмоцию
     try:
         await EmotionRepository(session).add(
             user_id=user.user_id,
@@ -244,7 +260,6 @@ async def full_loop(
     except Exception as exc:
         logger.warning("emotion log failed: %s", exc)
 
-    # 6. LLM ответ
     if intent_reply is not None:
         reply_text = intent_reply
         reply_model = "intent-handler"
@@ -262,7 +277,6 @@ async def full_loop(
 
     await convos.add(user.user_id, "assistant", reply_text)
 
-    # 7. Background memory store
     async def _store_memory():
         try:
             await default_memory().add(
@@ -286,5 +300,5 @@ async def full_loop(
         reply=reply_text,
         reply_model=reply_model,
         intent=intent.type if intent.type != "none" else None,
-        audio_url="/api/voice/tts/stream",  # фронт может стримить ответ
+        audio_url="/api/voice/tts/stream",
     )
