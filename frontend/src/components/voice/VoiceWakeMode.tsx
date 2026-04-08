@@ -63,6 +63,9 @@ export function VoiceWakeMode() {
   const playerRef = useRef<HTMLAudioElement | null>(null);
   const followUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const interruptDetectorRef = useRef<SpeechRecognition | null>(null);
+  // Флаг, что приветствие уже сказано в этой сессии (чтобы не повторять
+  // на каждый ре-mount / StrictMode double-invoke).
+  const greetedRef = useRef<boolean>(false);
 
   // --- Cleanup helpers ---
 
@@ -363,6 +366,36 @@ export function VoiceWakeMode() {
     }
   }, [phase, voice, returnToListening]);
 
+  // --- Proactive greeting on wake-mode activation ---
+  // Фреди сам здоровается, когда включают режим "всегда слушаю",
+  // и сразу переходит в follow-up режим — пользователь может говорить
+  // без произнесения wake word. Это и есть «Фреди первый входит в диалог».
+
+  const speakGreeting = useCallback(async (text: string) => {
+    wakeRef.current?.pause();
+    setPhase("speaking");
+    try {
+      const audioUrl = await streamSpeech(text, { tone: "warm", voice });
+      const player = new Audio(audioUrl);
+      playerRef.current = player;
+      const finish = () => {
+        URL.revokeObjectURL(audioUrl);
+        playerRef.current = null;
+        // После приветствия — сразу в follow_up, чтобы можно было
+        // говорить без wake word.
+        enterFollowUpMode();
+      };
+      player.onended = finish;
+      player.onerror = finish;
+      await player.play();
+    } catch {
+      // Если TTS недоступен — просто возвращаемся в режим ожидания
+      // wake word, не блокируя фичу.
+      setPhase("listening");
+      wakeRef.current?.resume();
+    }
+  }, [voice, enterFollowUpMode]);
+
   // --- Handle incoming trigger events ---
 
   const handleTriggerEvent = useCallback((evt: TriggerEvent) => {
@@ -380,6 +413,9 @@ export function VoiceWakeMode() {
     if (!alwaysListening || !supported) {
       wakeRef.current?.stop();
       wakeRef.current = null;
+      // Сбрасываем флаг приветствия, чтобы следующее включение режима
+      // снова поздоровалось.
+      greetedRef.current = false;
       return;
     }
 
@@ -399,7 +435,28 @@ export function VoiceWakeMode() {
 
     setPhase("listening");
 
+    // Proactive greeting: Фреди сам начинает разговор при активации
+    // режима "всегда слушаю". `greetedRef` флипается ВНУТРИ setTimeout
+    // callback — это переживает StrictMode double-mount (первый mount
+    // ставит таймер, cleanup его отменяет, второй mount ставит заново).
+    let greetingTimer: ReturnType<typeof setTimeout> | null = null;
+    if (!greetedRef.current) {
+      greetingTimer = setTimeout(() => {
+        if (greetedRef.current) return; // race guard
+        greetedRef.current = true;
+        const hour = new Date().getHours();
+        const timeGreet =
+          hour < 5 ? "Доброй ночи." :
+          hour < 12 ? "Доброе утро." :
+          hour < 18 ? "Добрый день." :
+          "Добрый вечер.";
+        const greeting = `${timeGreet} Я на связи — говори, я слушаю.`;
+        speakGreeting(greeting);
+      }, 400);
+    }
+
     return () => {
+      if (greetingTimer) clearTimeout(greetingTimer);
       detector.stop();
       wakeRef.current = null;
       if (triggerWsRef.current) {
@@ -407,7 +464,7 @@ export function VoiceWakeMode() {
         triggerWsRef.current = null;
       }
     };
-  }, [alwaysListening, supported, onWakeDetected, handleTriggerEvent]);
+  }, [alwaysListening, supported, onWakeDetected, handleTriggerEvent, speakGreeting]);
 
   // Cleanup on unmount
   useEffect(() => () => cleanupAll(), [cleanupAll]);
