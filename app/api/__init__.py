@@ -18,6 +18,7 @@ from . import agents as agents_router
 from . import auth as auth_router
 from . import brief as brief_router
 from . import chat as chat_router
+from . import dashboard as dashboard_router
 from . import feedback as feedback_router
 from . import push as push_router
 from . import system as system_router
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(vision_router.router)
     app.include_router(feedback_router.router)
     app.include_router(brief_router.router)
+    app.include_router(dashboard_router.router)
 
     return app
 
