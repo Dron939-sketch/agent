@@ -416,6 +416,24 @@ async def send(
                 message_id=msg_id,
             )
 
+    # Sprint Jarvis: проверяем нужна ли цепочка действий
+    try:
+        from app.services.chains import is_chain_request, plan_chain, execute_chain, format_chain_response
+
+        if is_chain_request(body.message):
+            plan = await plan_chain(body.message)
+            if plan and plan.get("steps"):
+                results = await execute_chain(plan)
+                chain_reply = format_chain_response(plan, results)
+                msg_id = await convos.add(user.user_id, "assistant", chain_reply)
+                return ChatResponseOut(
+                    reply=chain_reply,
+                    model="chain-executor",
+                    message_id=msg_id,
+                )
+    except Exception as exc:
+        logger.warning("chain execution failed, falling back to LLM: %s", exc)
+
     emotion_service = EmotionService(default_router())
     aggregator = ContextAggregator(session, emotion_service=emotion_service)
     full_ctx = await aggregator.get_full_context(user.user_id, body.message)

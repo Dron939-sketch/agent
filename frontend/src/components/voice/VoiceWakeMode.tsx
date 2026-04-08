@@ -20,7 +20,22 @@ import { SilenceDetector } from "@/lib/vad";
 import { WakeWordDetector, isWakeWordSupported, type WakeWordStatus } from "@/lib/wakeword";
 import { EmotionBadge } from "./EmotionBadge";
 
-type Phase = "listening" | "recording" | "processing" | "speaking" | "error";
+/**
+ * Фазы:
+ *   listening    → ждём wake word "Фреди"
+ *   follow_up    → 30с окно: слушаем продолжение без wake word
+ *   recording    → записываем полное сообщение
+ *   processing   → отправляем на бэкенд
+ *   speaking     → воспроизводим ответ (можно прервать "Стоп")
+ *   error        → ошибка
+ */
+type Phase = "listening" | "follow_up" | "recording" | "processing" | "speaking" | "error";
+
+/** Сколько секунд ждём продолжения диалога без wake word. */
+const FOLLOW_UP_WINDOW_MS = 30_000;
+
+/** Стоп-слова для прерывания воспроизведения. */
+const STOP_WORDS = ["стоп", "хватит", "замолчи", "тихо", "stop", "enough"];
 
 export function VoiceWakeMode() {
   const token = useSession((s) => s.token);
@@ -35,6 +50,7 @@ export function VoiceWakeMode() {
   const [error, setError] = useState<string | null>(null);
   const [supported] = useState(() => isWakeWordSupported());
   const [notification, setNotification] = useState<TriggerEvent | null>(null);
+  const [followUpCountdown, setFollowUpCountdown] = useState(0);
 
   const wakeRef = useRef<WakeWordDetector | null>(null);
   const triggerWsRef = useRef<WebSocket | null>(null);
@@ -45,6 +61,8 @@ export function VoiceWakeMode() {
   const chunksRef = useRef<Blob[]>([]);
   const vadRef = useRef<SilenceDetector | null>(null);
   const playerRef = useRef<HTMLAudioElement | null>(null);
+  const followUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interruptDetectorRef = useRef<SpeechRecognition | null>(null);
 
   // --- Cleanup helpers ---
 
@@ -62,8 +80,30 @@ export function VoiceWakeMode() {
     setLevel(new Array(48).fill(0));
   }, []);
 
+  const stopInterruptDetector = useCallback(() => {
+    if (interruptDetectorRef.current) {
+      try {
+        interruptDetectorRef.current.onresult = null;
+        interruptDetectorRef.current.onend = null;
+        interruptDetectorRef.current.onerror = null;
+        interruptDetectorRef.current.abort();
+      } catch {}
+      interruptDetectorRef.current = null;
+    }
+  }, []);
+
+  const clearFollowUpTimer = useCallback(() => {
+    if (followUpTimerRef.current) {
+      clearTimeout(followUpTimerRef.current);
+      followUpTimerRef.current = null;
+    }
+    setFollowUpCountdown(0);
+  }, []);
+
   const cleanupAll = useCallback(() => {
     cleanupRecording();
+    clearFollowUpTimer();
+    stopInterruptDetector();
     wakeRef.current?.stop();
     wakeRef.current = null;
     if (triggerWsRef.current) {
@@ -74,7 +114,7 @@ export function VoiceWakeMode() {
       try { playerRef.current.pause(); } catch {}
       playerRef.current = null;
     }
-  }, [cleanupRecording]);
+  }, [cleanupRecording, clearFollowUpTimer, stopInterruptDetector]);
 
   // --- Wake word detected → start recording ---
 
@@ -176,40 +216,123 @@ export function VoiceWakeMode() {
       const audioUrl = await streamSpeech(response.reply.slice(0, 1000), { tone, voice });
       const player = new Audio(audioUrl);
       playerRef.current = player;
+
+      // Start interrupt detector — user can say "Стоп" to interrupt
+      startInterruptDetector();
+
       player.onended = () => {
         URL.revokeObjectURL(audioUrl);
         playerRef.current = null;
+        stopInterruptDetector();
         returnToListening();
       };
       player.onerror = () => {
         URL.revokeObjectURL(audioUrl);
         playerRef.current = null;
+        stopInterruptDetector();
         returnToListening();
       };
       await player.play();
     } catch (err) {
       setError(`TTS: ${(err as Error).message}`);
+      stopInterruptDetector();
       returnToListening();
     }
-  }, [voice]);
+  }, [voice, startInterruptDetector, stopInterruptDetector]);
+
+  // --- Interrupt detection: listen for "Стоп" during speaking ---
+
+  const startInterruptDetector = useCallback(() => {
+    stopInterruptDetector();
+    const SRClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SRClass) return;
+
+    const sr = new SRClass();
+    sr.continuous = true;
+    sr.interimResults = true;
+    sr.lang = "ru-RU";
+
+    sr.onresult = (event: SpeechRecognitionEvent) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const text = event.results[i][0].transcript.toLowerCase().trim();
+        for (const sw of STOP_WORDS) {
+          if (text.includes(sw)) {
+            // Прерываем воспроизведение
+            if (playerRef.current) {
+              try { playerRef.current.pause(); } catch {}
+              playerRef.current = null;
+            }
+            stopInterruptDetector();
+            enterFollowUpMode();
+            return;
+          }
+        }
+      }
+    };
+    sr.onerror = () => {};
+    sr.onend = () => { interruptDetectorRef.current = null; };
+
+    try {
+      sr.start();
+      interruptDetectorRef.current = sr;
+    } catch {}
+  }, [stopInterruptDetector]);
+
+  // --- Follow-up mode: 30s window to continue dialogue without wake word ---
+
+  const enterFollowUpMode = useCallback(() => {
+    clearFollowUpTimer();
+    setPhase("follow_up");
+    setError(null);
+    setFollowUpCountdown(FOLLOW_UP_WINDOW_MS / 1000);
+
+    // Pause wake word detector — we're in direct conversation mode
+    wakeRef.current?.pause();
+
+    // Countdown display
+    const interval = setInterval(() => {
+      setFollowUpCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // Auto-exit follow-up after timeout
+    followUpTimerRef.current = setTimeout(() => {
+      clearInterval(interval);
+      setFollowUpCountdown(0);
+      followUpTimerRef.current = null;
+      // Return to normal listening
+      setPhase("listening");
+      wakeRef.current?.resume();
+    }, FOLLOW_UP_WINDOW_MS);
+  }, [clearFollowUpTimer]);
 
   // --- Return to listening after interaction ---
 
   const returnToListening = useCallback(() => {
-    setPhase("listening");
     setError(null);
-    // Возобновляем wake word прослушивание
-    if (wakeRef.current) {
-      wakeRef.current.resume();
+    stopInterruptDetector();
+    // After a conversation — enter follow-up mode instead of cold listening
+    if (result?.reply) {
+      enterFollowUpMode();
+    } else {
+      setPhase("listening");
+      if (wakeRef.current) {
+        wakeRef.current.resume();
+      }
     }
-  }, []);
+  }, [result, enterFollowUpMode, stopInterruptDetector]);
 
   // --- Handle wake word detection ---
 
   const onWakeDetected = useCallback((_trailing: string) => {
-    // Wake word обнаружен — начинаем запись
+    clearFollowUpTimer();
     startRecording();
-  }, [startRecording]);
+  }, [startRecording, clearFollowUpTimer]);
 
   // --- Speak a proactive notification aloud ---
 
@@ -294,15 +417,17 @@ export function VoiceWakeMode() {
 
   const phaseLabel: Record<Phase, string> = {
     listening: "Слушаю... скажи \"Фреди\"",
+    follow_up: `Продолжай... (${followUpCountdown}с)`,
     recording: "Слушаю тебя...",
     processing: "Думаю...",
-    speaking: "Говорю...",
+    speaking: "Говорю... (скажи \"Стоп\")",
     error: "Ошибка",
   };
 
   const isRecording = phase === "recording";
   const isBusy = phase === "processing" || phase === "speaking";
   const isListening = phase === "listening";
+  const isFollowUp = phase === "follow_up";
 
   return (
     <motion.div
@@ -335,6 +460,9 @@ export function VoiceWakeMode() {
           {isListening && (
             <Ear className="h-4 w-4 animate-pulse text-green-400" />
           )}
+          {isFollowUp && (
+            <Mic className="h-4 w-4 animate-pulse text-blue-400" />
+          )}
           {phase === "speaking" && (
             <Volume2 className="h-4 w-4 animate-pulse text-neon-cyan" />
           )}
@@ -364,7 +492,7 @@ export function VoiceWakeMode() {
         {/* Visualizer */}
         <div className="mx-auto mb-4 flex h-24 w-full max-w-xs items-end justify-center gap-[3px]">
           {isListening ? (
-            // Мягная пульсация в режиме прослушивания
+            // Мягная зелёная пульсация — ждём wake word
             <div className="flex h-full w-full items-center justify-center">
               <motion.div
                 className="h-16 w-16 rounded-full bg-gradient-to-br from-green-400/20 to-green-600/10 border border-green-400/30"
@@ -374,6 +502,22 @@ export function VoiceWakeMode() {
                 }}
                 transition={{
                   duration: 2.5,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                }}
+              />
+            </div>
+          ) : isFollowUp ? (
+            // Синяя пульсация — ждём продолжения диалога
+            <div className="flex h-full w-full items-center justify-center">
+              <motion.div
+                className="h-16 w-16 rounded-full bg-gradient-to-br from-blue-400/30 to-blue-600/10 border border-blue-400/40"
+                animate={{
+                  scale: [1, 1.2, 1],
+                  opacity: [0.7, 1, 0.7],
+                }}
+                transition={{
+                  duration: 1.5,
                   repeat: Infinity,
                   ease: "easeInOut",
                 }}
@@ -395,30 +539,47 @@ export function VoiceWakeMode() {
           className={`mx-auto flex h-20 w-20 items-center justify-center rounded-full transition disabled:opacity-50 ${
             isListening
               ? "bg-gradient-to-br from-green-400 via-green-500 to-emerald-600 shadow-[0_0_40px_rgba(74,222,128,0.35)]"
-              : isRecording
-                ? "bg-red-500/80 shadow-[0_0_60px_rgba(239,68,68,0.55)]"
-                : "bg-gradient-to-br from-neon-cyan via-neon-violet to-neon-pink shadow-neon"
+              : isFollowUp
+                ? "bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 shadow-[0_0_40px_rgba(96,165,250,0.45)]"
+                : isRecording
+                  ? "bg-red-500/80 shadow-[0_0_60px_rgba(239,68,68,0.55)]"
+                  : "bg-gradient-to-br from-neon-cyan via-neon-violet to-neon-pink shadow-neon"
           }`}
           onClick={
-            isListening
-              ? startRecording  // Ручной старт записи (не дожидаясь wake word)
+            isListening || isFollowUp
+              ? () => { clearFollowUpTimer(); startRecording(); }
               : isRecording
                 ? () => { try { recorderRef.current?.stop(); } catch {} }
-                : undefined
+                : phase === "speaking"
+                  ? () => {
+                      // Прервать озвучку по нажатию кнопки
+                      if (playerRef.current) { try { playerRef.current.pause(); } catch {} playerRef.current = null; }
+                      stopInterruptDetector();
+                      enterFollowUpMode();
+                    }
+                  : undefined
           }
-          disabled={isBusy}
+          disabled={phase === "processing"}
           aria-label={
             isListening
               ? "Начать запись вручную"
-              : isRecording
-                ? "Остановить запись"
-                : "Обработка..."
+              : isFollowUp
+                ? "Продолжить диалог"
+                : isRecording
+                  ? "Остановить запись"
+                  : phase === "speaking"
+                    ? "Прервать"
+                    : "Обработка..."
           }
         >
           {isListening ? (
             <Ear className="h-8 w-8 text-white" />
+          ) : isFollowUp ? (
+            <Mic className="h-8 w-8 text-white" />
           ) : isRecording ? (
             <MicOff className="h-8 w-8 text-white" />
+          ) : phase === "speaking" ? (
+            <Volume2 className="h-8 w-8 text-white" />
           ) : (
             <Mic className="h-8 w-8 text-white" />
           )}
@@ -485,9 +646,13 @@ export function VoiceWakeMode() {
         <div className="mt-4 text-center text-[10px] text-slate-500">
           {isListening
             ? "Скажи \"Фреди\" или нажми кнопку для записи"
-            : isBusy
-              ? ""
-              : "Нажми для остановки записи"}
+            : isFollowUp
+              ? "Продолжай говорить или нажми кнопку — wake word не нужен"
+              : phase === "speaking"
+                ? "Скажи \"Стоп\" или нажми кнопку чтобы прервать"
+                : phase === "processing"
+                  ? ""
+                  : "Нажми для остановки записи"}
         </div>
       </motion.div>
     </motion.div>
