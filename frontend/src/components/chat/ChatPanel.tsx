@@ -19,7 +19,7 @@ import {
   generateImage,
   sendChat,
   sendFeedback,
-  streamChat,
+  streamChatEvents,
   streamSpeech,
   type ChatMessage as ChatMsgT
 } from "@/lib/api";
@@ -58,6 +58,77 @@ function openAuth() {
   }
 }
 
+/**
+ * Очередь TTS — каждое предложение прокидывается в streamSpeech и
+ * проигрывается, как только придёт. Следующее предложение играет ТОЛЬКО
+ * после того, как закончится текущее (`onended`).
+ */
+class TTSQueue {
+  private queue: string[] = [];
+  private playing = false;
+  private aborted = false;
+  private current: HTMLAudioElement | null = null;
+
+  constructor(
+    private voice: string,
+    private tone: string,
+    private onPhase?: (s: "speaking" | "idle") => void
+  ) {}
+
+  push(sentence: string) {
+    if (this.aborted) return;
+    this.queue.push(sentence);
+    if (!this.playing) void this._next();
+  }
+
+  abort() {
+    this.aborted = true;
+    this.queue = [];
+    if (this.current) {
+      try {
+        this.current.pause();
+      } catch {}
+      this.current = null;
+    }
+    this.playing = false;
+    this.onPhase?.("idle");
+  }
+
+  private async _next() {
+    if (this.aborted) return;
+    if (this.queue.length === 0) {
+      this.playing = false;
+      this.onPhase?.("idle");
+      return;
+    }
+    this.playing = true;
+    this.onPhase?.("speaking");
+    const sentence = this.queue.shift()!;
+    try {
+      const url = await streamSpeech(sentence, { voice: this.voice, tone: this.tone });
+      if (this.aborted) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      const audio = new Audio(url);
+      this.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        if (this.current === audio) this.current = null;
+        void this._next();
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (this.current === audio) this.current = null;
+        void this._next();
+      };
+      await audio.play();
+    } catch {
+      void this._next();
+    }
+  }
+}
+
 export function ChatPanel({ id, onStateChange }: Props) {
   const token = useSession((s) => s.token);
   const voiceReply = useSession((s) => s.voiceReply);
@@ -74,7 +145,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
   const [busy, setBusy] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const playerRef = useRef<HTMLAudioElement | null>(null);
+  const queueRef = useRef<TTSQueue | null>(null);
 
   function scrollToEnd() {
     queueMicrotask(() =>
@@ -85,43 +156,10 @@ export function ChatPanel({ id, onStateChange }: Props) {
     );
   }
 
-  function stopAudio() {
-    if (playerRef.current) {
-      try {
-        playerRef.current.pause();
-      } catch {}
-      playerRef.current = null;
-    }
-  }
-
-  async function speakReply(text: string, tone?: string | null) {
-    if (!voiceReply || !text.trim()) return;
-    stopAudio();
-    try {
-      const url = await streamSpeech(text.slice(0, 1500), {
-        tone: tone ?? "warm",
-        voice
-      });
-      const audio = new Audio(url);
-      playerRef.current = audio;
-      onStateChange?.("speaking");
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        if (playerRef.current === audio) {
-          playerRef.current = null;
-          onStateChange?.("idle");
-        }
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        if (playerRef.current === audio) {
-          playerRef.current = null;
-          onStateChange?.("idle");
-        }
-      };
-      await audio.play();
-    } catch {
-      onStateChange?.("idle");
+  function abortQueue() {
+    if (queueRef.current) {
+      queueRef.current.abort();
+      queueRef.current = null;
     }
   }
 
@@ -132,7 +170,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
       return;
     }
 
-    stopAudio();
+    abortQueue();
 
     const user = input.trim();
     setInput("");
@@ -162,7 +200,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
           ...m,
           {
             role: "assistant",
-            content: `⚠️ Не получилось сгенерировать (${(err as Error).message}). Возможно, не задан REPLICATE_API_TOKEN.`
+            content: `⚠️ Не получилось сгенерировать (${(err as Error).message}).`
           }
         ]);
       } finally {
@@ -179,13 +217,26 @@ export function ChatPanel({ id, onStateChange }: Props) {
 
       const metaPromise = sendChat(user, { profile: "smart" }).catch(() => null);
 
-      await streamChat(user, (chunk) => {
-        acc += chunk;
-        setMessages((m) => {
-          const next = [...m];
-          next[next.length - 1] = { role: "assistant", content: acc };
-          return next;
-        });
+      // Создаём TTS-очередь сразу — она будет получать предложения
+      // ПО МЕРЕ генерации, не дожидаясь конца ответа.
+      let queue: TTSQueue | null = null;
+      if (voiceReply) {
+        // tone узнаем после meta — пока стартуем с warm
+        queue = new TTSQueue(voice, "warm", (s) => onStateChange?.(s));
+        queueRef.current = queue;
+      }
+
+      await streamChatEvents(user, (evt) => {
+        if (evt.type === "token") {
+          acc += evt.text;
+          setMessages((m) => {
+            const next = [...m];
+            next[next.length - 1] = { role: "assistant", content: acc };
+            return next;
+          });
+        } else if (evt.type === "sentence" && queue) {
+          queue.push(evt.text);
+        }
       });
 
       const meta = await metaPromise;
@@ -206,11 +257,6 @@ export function ChatPanel({ id, onStateChange }: Props) {
           return next;
         });
       }
-
-      const finalText = (meta?.reply ?? acc) || acc;
-      if (voiceReply && finalText.trim()) {
-        await speakReply(finalText, meta?.tone);
-      }
     } catch (err) {
       const msg = (err as Error).message;
       const is401 = msg.includes(" 401") || msg.includes("missing bearer");
@@ -224,7 +270,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
       if (is401) openAuth();
     } finally {
       setBusy(false);
-      if (!voiceReply) onStateChange?.("idle");
+      // не сбрасываем speaking — TTS queue ещё может играть
       scrollToEnd();
     }
   }
@@ -234,7 +280,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
       openAuth();
       return;
     }
-    stopAudio();
+    abortQueue();
     setMessages((m) => [
       ...m,
       {
@@ -249,14 +295,18 @@ export function ChatPanel({ id, onStateChange }: Props) {
       const res = await analyzeImage(file, "Опиши изображение по-русски, кратко и точно.");
       setMessages((m) => [...m, { role: "assistant", content: res.text, tone: "warm" }]);
       if (voiceReply && res.text) {
-        await speakReply(res.text, "warm");
+        const queue = new TTSQueue(voice, "warm", (s) => onStateChange?.(s));
+        queueRef.current = queue;
+        // Разбиваем длинный ответ на предложения локально
+        const sentences = res.text.split(/(?<=[.!?…])\s+/).filter(Boolean);
+        for (const s of sentences) queue.push(s);
       }
     } catch (err) {
       setMessages((m) => [
         ...m,
         {
           role: "assistant",
-          content: `⚠️ Не получилось проанализировать (${(err as Error).message}). Возможно, не задан ANTHROPIC_API_KEY.`
+          content: `⚠️ Не получилось проанализировать (${(err as Error).message}).`
         }
       ]);
     } finally {
@@ -282,9 +332,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
   }
 
   function toggleVoiceReply() {
-    if (voiceReply) {
-      stopAudio();
-    }
+    if (voiceReply) abortQueue();
     setVoiceReply(!voiceReply);
   }
 
@@ -303,7 +351,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
     }
   }, [token]);
 
-  useEffect(() => () => stopAudio(), []);
+  useEffect(() => () => abortQueue(), []);
 
   return (
     <section id={id} className="glass flex h-[560px] flex-col p-4">
