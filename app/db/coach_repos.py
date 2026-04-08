@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Goal, Habit, HabitCheck
@@ -110,15 +110,22 @@ class HabitRepository:
         return await self.session.get(Habit, habit_id)
 
     async def find_by_title(self, user_id: str, query: str) -> Habit | None:
-        """Поиск привычки по подстроке (case-insensitive, работает с кириллицей)."""
-        like = f"%{query.lower()}%"
+        """Поиск привычки по подстроке (case-insensitive, работает с кириллицей).
+
+        SQLite's built-in ``lower()`` is ASCII-only, so мы фильтруем в Python
+        через ``casefold`` — Unicode-safe и корректно обрабатывает кириллицу.
+        Это оправдано: у одного пользователя редко больше десятков привычек.
+        """
+        q = query.casefold().strip()
+        if not q:
+            return None
         result = await self.session.execute(
-            select(Habit).where(
-                Habit.user_id == user_id,
-                func.lower(Habit.title).like(like),
-            )
+            select(Habit).where(Habit.user_id == user_id).order_by(Habit.id.desc())
         )
-        return result.scalars().first()
+        for habit in result.scalars().all():
+            if q in habit.title.casefold():
+                return habit
+        return None
 
     async def check_in(self, habit_id: int, user_id: str, note: str | None = None) -> dict:
         """Отмечает выполнение привычки. Обновляет streak."""
