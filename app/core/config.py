@@ -1,7 +1,6 @@
 """Конфигурация приложения.
 
-Извлечено из монолитного main.py в рамках Фазы 1 рефакторинга.
-В будущем будет заменено на pydantic-settings.
+Sprint 2: добавлены ELEVENLABS, HUME, REPLICATE.
 """
 
 from __future__ import annotations
@@ -17,7 +16,6 @@ def _normalize_database_url(raw: str) -> str:
 
     Render/Heroku отдают `postgres://` — устаревшая схема, SQLAlchemy
     отказывается её использовать. Переводим в `postgresql+asyncpg://`.
-    Для `postgresql://` без драйвера также подставляем `+asyncpg`.
     """
     if not raw:
         return raw
@@ -42,6 +40,20 @@ class Config:
     DEEPGRAM_API_KEY: str = os.environ.get("DEEPGRAM_API_KEY", "")
     VAD_MODE: str = os.environ.get("VAD_MODE", "webrtc")
 
+    # === Premium TTS (Sprint 2) ===
+    ELEVENLABS_API_KEY: str = os.environ.get("ELEVENLABS_API_KEY", "")
+    ELEVENLABS_VOICE_ID: str = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
+    ELEVENLABS_MODEL: str = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+
+    # === Voice emotion (Sprint 2) ===
+    HUME_API_KEY: str = os.environ.get("HUME_API_KEY", "")
+
+    # === Image generation (Sprint 2) ===
+    REPLICATE_API_TOKEN: str = os.environ.get("REPLICATE_API_TOKEN", "")
+    REPLICATE_MODEL: str = os.environ.get(
+        "REPLICATE_MODEL", "black-forest-labs/flux-schnell"
+    )
+
     # === Web Push (VAPID) ===
     VAPID_PRIVATE_KEY: str = os.environ.get("VAPID_PRIVATE_KEY", "")
     VAPID_PUBLIC_KEY: str = os.environ.get("VAPID_PUBLIC_KEY", "")
@@ -57,7 +69,7 @@ class Config:
 
     # === Приложение ===
     APP_NAME: str = "Фреди AI Помощник"
-    APP_VERSION: str = "5.1.0-dev"
+    APP_VERSION: str = "5.2.0-dev"
     SECRET_KEY: str = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
     PORT: int = int(os.environ.get("PORT", 8000))
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
@@ -90,6 +102,5 @@ class Config:
 
 @lru_cache(maxsize=1)
 def get_settings() -> Config:
-    """Singleton-доступ к конфигурации."""
     Config.ensure_dirs()
     return Config()
