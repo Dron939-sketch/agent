@@ -6,12 +6,10 @@
  * (Полная graph-визуализация через D3/vis-network — в будущем.)
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
 import { Brain, User, Heart, Target, Briefcase, Activity, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { useSession } from "@/store/session";
 import { resolveApiUrl } from "@/lib/api";
-
-const API = resolveApiUrl();
 
 type KnowledgeFact = {
   subject: string;
@@ -28,15 +26,22 @@ type KnowledgeData = {
   total: number;
 };
 
-const CATEGORY_META: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
-  personal: { label: "Личное", icon: <User className="h-3.5 w-3.5" />, color: "text-blue-400" },
-  preference: { label: "Предпочтения", icon: <Heart className="h-3.5 w-3.5" />, color: "text-pink-400" },
-  goal: { label: "Цели", icon: <Target className="h-3.5 w-3.5" />, color: "text-emerald-400" },
-  work: { label: "Работа", icon: <Briefcase className="h-3.5 w-3.5" />, color: "text-amber-400" },
-  health: { label: "Здоровье", icon: <Activity className="h-3.5 w-3.5" />, color: "text-red-400" },
-  relation: { label: "Отношения", icon: <User className="h-3.5 w-3.5" />, color: "text-violet-400" },
-  habit: { label: "Привычки", icon: <RefreshCw className="h-3.5 w-3.5" />, color: "text-cyan-400" },
-};
+type CategoryMeta = { label: string; icon: ReactNode; color: string };
+
+// Фабрика мета-данных. Построение переезжает внутрь функции, чтобы JSX
+// элементов (lucide-react иконок) не создавался на module-init level —
+// это исключает TDZ на lazy-загруженных chunk'ах.
+function buildCategoryMeta(): Record<string, CategoryMeta> {
+  return {
+    personal: { label: "Личное", icon: <User className="h-3.5 w-3.5" />, color: "text-blue-400" },
+    preference: { label: "Предпочтения", icon: <Heart className="h-3.5 w-3.5" />, color: "text-pink-400" },
+    goal: { label: "Цели", icon: <Target className="h-3.5 w-3.5" />, color: "text-emerald-400" },
+    work: { label: "Работа", icon: <Briefcase className="h-3.5 w-3.5" />, color: "text-amber-400" },
+    health: { label: "Здоровье", icon: <Activity className="h-3.5 w-3.5" />, color: "text-red-400" },
+    relation: { label: "Отношения", icon: <User className="h-3.5 w-3.5" />, color: "text-violet-400" },
+    habit: { label: "Привычки", icon: <RefreshCw className="h-3.5 w-3.5" />, color: "text-cyan-400" },
+  };
+}
 
 function authHeaders(): HeadersInit {
   if (typeof window === "undefined") return {};
@@ -49,14 +54,20 @@ export function KnowledgeGraph() {
   const [data, setData] = useState<KnowledgeData | null>(null);
   const [loading, setLoading] = useState(false);
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set(["personal", "preference"]));
+  // Мета лениво создаётся при первом render'е — внутри компонента, а не
+  // на module-init level. JSX иконок тоже строится лениво.
+  const [categoryMeta] = useState(() => buildCategoryMeta());
 
   const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
+      // API URL резолвится внутри callback — не на module-init level,
+      // чтобы исключить TDZ при lazy chunk load.
+      const apiUrl = resolveApiUrl();
       // Use the triggers check endpoint as a proxy for now,
       // or fetch facts directly if the API exists
-      const res = await fetch(`${API}/api/triggers/check`, {
+      const res = await fetch(`${apiUrl}/api/triggers/check`, {
         headers: { ...authHeaders() },
       });
       // Knowledge graph doesn't have a dedicated REST API yet,
@@ -107,7 +118,7 @@ export function KnowledgeGraph() {
           <p>Граф знаний строится автоматически из каждого диалога.</p>
           <p className="mt-1">Расскажи Фреди о себе — он запомнит и будет использовать.</p>
           <div className="mt-3 grid grid-cols-2 gap-1.5">
-            {Object.entries(CATEGORY_META).map(([key, meta]) => (
+            {Object.entries(categoryMeta).map(([key, meta]) => (
               <div
                 key={key}
                 className="flex items-center gap-1.5 rounded-lg border border-white/5 bg-white/5 px-2 py-1.5"
