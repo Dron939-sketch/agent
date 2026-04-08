@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Goal, Habit, HabitCheck
@@ -110,21 +110,18 @@ class HabitRepository:
         return await self.session.get(Habit, habit_id)
 
     async def find_by_title(self, user_id: str, query: str) -> Habit | None:
-        """Поиск привычки по подстроке в названии (для голосовых команд)."""
-        q = f"%{query.lower()}%"
+        """Поиск привычки по подстроке (case-insensitive, работает с кириллицей)."""
+        like = f"%{query.lower()}%"
         result = await self.session.execute(
             select(Habit).where(
                 Habit.user_id == user_id,
-                Habit.title.ilike(q),
+                func.lower(Habit.title).like(like),
             )
         )
         return result.scalars().first()
 
     async def check_in(self, habit_id: int, user_id: str, note: str | None = None) -> dict:
-        """Отмечает выполнение привычки. Обновляет streak.
-
-        Возвращает {streak, longest_streak, was_already_done_today}.
-        """
+        """Отмечает выполнение привычки. Обновляет streak."""
         habit = await self.get(habit_id)
         if habit is None:
             return {"streak": 0, "longest_streak": 0, "was_already_done_today": False}
@@ -137,11 +134,10 @@ class HabitRepository:
                 was_today = True
 
         if not was_today:
-            # Рассчитываем новый streak
             new_streak = 1
             if habit.last_check_at:
                 delta = now - habit.last_check_at
-                if delta < timedelta(hours=48):  # вчера = streak продолжается
+                if delta < timedelta(hours=48):
                     new_streak = habit.streak + 1
             longest = max(habit.longest_streak, new_streak)
 
@@ -152,11 +148,7 @@ class HabitRepository:
             )
 
             self.session.add(
-                HabitCheck(
-                    habit_id=habit_id,
-                    user_id=user_id,
-                    note=note,
-                )
+                HabitCheck(habit_id=habit_id, user_id=user_id, note=note)
             )
             await self.session.flush()
             return {
