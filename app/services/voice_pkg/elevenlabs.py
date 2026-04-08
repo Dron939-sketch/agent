@@ -1,9 +1,7 @@
 """ElevenLabs streaming TTS клиент.
 
-Sprint 2: премиум TTS с естественными паузами, дыханием, эмоциями.
-
-Использует Eleven multilingual v2 + Turbo v2.5 (если доступно).
-Поддерживает stability/similarity_boost/style для эмоциональной окраски.
+Премиум TTS с естественными паузами, дыханием, эмоциями.
+Использует Eleven multilingual v2 + Turbo v2.5.
 
 Endpoint: https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream
 """
@@ -22,6 +20,10 @@ logger = get_logger(__name__)
 API_BASE = "https://api.elevenlabs.io/v1"
 DEFAULT_VOICE = "EXAVITQu4vr4xnSDxMaL"  # Bella — нейтральный женский, multilingual
 
+# Глобальный множитель скорости речи (+10%). ElevenLabs принимает speed
+# в [0.7; 1.2] (поле в voice_settings model v3+).
+SPEED_BOOST = 1.10
+
 
 class ElevenLabsTTS:
     """Streaming TTS поверх ElevenLabs API."""
@@ -39,15 +41,9 @@ class ElevenLabsTTS:
     def is_configured(self) -> bool:
         return bool(self.api_key)
 
-    def _voice_settings(self, tone: str = "warm") -> dict[str, float]:
-        """Маппинг наших tone'ов на ElevenLabs voice_settings.
-
-        - stability: 0..1 — насколько стабильный голос (низкое = эмоциональнее)
-        - similarity_boost: 0..1 — насколько близко к голосу
-        - style: 0..1 — выразительность (только в v2)
-        - use_speaker_boost: bool
-        """
-        presets = {
+    def _voice_settings(self, tone: str = "warm") -> dict[str, float | bool]:
+        """Маппинг наших tone'ов на ElevenLabs voice_settings."""
+        presets: dict[str, dict[str, float]] = {
             "warm": {"stability": 0.65, "similarity_boost": 0.85, "style": 0.35},
             "calm": {"stability": 0.85, "similarity_boost": 0.85, "style": 0.15},
             "energetic": {"stability": 0.35, "similarity_boost": 0.75, "style": 0.75},
@@ -56,11 +52,14 @@ class ElevenLabsTTS:
             "clarifying": {"stability": 0.80, "similarity_boost": 0.85, "style": 0.20},
         }
         s = presets.get(tone, presets["warm"])
+        # speed clamping в допустимом ElevenLabs диапазоне [0.7; 1.2]
+        speed = round(min(1.2, max(0.7, 1.0 * SPEED_BOOST)), 3)
         return {
             "stability": s["stability"],
             "similarity_boost": s["similarity_boost"],
             "style": s["style"],
             "use_speaker_boost": True,
+            "speed": speed,
         }
 
     async def synthesize(
@@ -103,11 +102,7 @@ class ElevenLabsTTS:
         *,
         tone: str = "warm",
     ) -> AsyncIterator[bytes]:
-        """Streaming TTS — отдаёт MP3 chunks по мере генерации.
-
-        Используется для realtime воспроизведения: фронт может проигрывать
-        первые байты, пока модель ещё генерирует остальное.
-        """
+        """Streaming TTS — отдаёт MP3 chunks по мере генерации."""
         if not self.is_configured() or not text:
             return
         url = f"{API_BASE}/text-to-speech/{self.voice_id}/stream"
@@ -120,7 +115,7 @@ class ElevenLabsTTS:
             "text": text,
             "model_id": self.model,
             "voice_settings": self._voice_settings(tone),
-            "optimize_streaming_latency": 3,  # 0..4, выше = быстрее но с потерей качества
+            "optimize_streaming_latency": 3,
         }
         try:
             async with aiohttp.ClientSession() as session:
@@ -136,7 +131,6 @@ class ElevenLabsTTS:
             logger.exception("ElevenLabs stream error: %s", exc)
 
     async def list_voices(self) -> list[dict] | None:
-        """Возвращает список доступных голосов аккаунта."""
         if not self.is_configured():
             return None
         try:
