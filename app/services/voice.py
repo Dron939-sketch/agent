@@ -1,7 +1,7 @@
 """Voice services: STT (Deepgram + Yandex) + TTS (ElevenLabs + Yandex с SSML).
 
-Sprint 3.5: Поддержка SSML для Yandex (паузы, ударения, эмоции),
-голос `madirus` (сербский баритон) как дефолт — звучит как Милош Бикович.
+Голос `madirus` (сербский баритон) — звучит как Милош Бикович.
+Скорость speech +10% относительно дефолта Yandex (см. SPEED_BOOST).
 """
 
 from __future__ import annotations
@@ -21,9 +21,7 @@ YANDEX_STT_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 YANDEX_TTS_URL = "https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize"
 
 # === Каталог голосов Yandex SpeechKit ===
-# https://cloud.yandex.ru/docs/speechkit/tts/voices
 YANDEX_VOICES = {
-    # Мужские
     "madirus": {
         "label": "Madirus (сербский баритон, ~Бикович)",
         "gender": "male",
@@ -34,15 +32,18 @@ YANDEX_VOICES = {
     "ermil": {"label": "Ермил (выразительный)", "gender": "male"},
     "zahar": {"label": "Захар (энергичный)", "gender": "male"},
     "kuznetsov": {"label": "Кузнецов (нейтральный)", "gender": "male"},
-    # Женские
     "jane": {"label": "Джейн (нейтральный)", "gender": "female"},
     "oksana": {"label": "Оксана (тёплый)", "gender": "female"},
     "alyss": {"label": "Алисса (молодой)", "gender": "female"},
     "omazh": {"label": "Омаж (мягкий)", "gender": "female"},
 }
 
-# Эмоциональная окраска по нашим внутренним tone'ам
-TONE_TO_YANDEX = {
+# Глобальный множитель скорости речи. 1.10 = +10% (быстрее).
+# По просьбе пользователя — увеличиваем темп на 10% во всех tone-пресетах.
+SPEED_BOOST = 1.10
+
+# Эмоциональная окраска по нашим внутренним tone'ам (base speed)
+_TONE_BASE = {
     "warm": ("good", 1.0),
     "calm": ("neutral", 0.95),
     "energetic": ("good", 1.1),
@@ -51,29 +52,28 @@ TONE_TO_YANDEX = {
     "clarifying": ("neutral", 0.97),
 }
 
+# Финальные значения с применённым boost'ом. Yandex принимает speed в [0.1; 3.0].
+TONE_TO_YANDEX = {
+    name: (emotion, round(min(3.0, max(0.1, base_speed * SPEED_BOOST)), 3))
+    for name, (emotion, base_speed) in _TONE_BASE.items()
+}
+
 
 def text_to_ssml(text: str) -> str:
     """Превращает обычный текст в SSML с естественными паузами.
 
     Правила (эмулируют «Бикович-стиль» — задумчивый, с паузами):
     - `…` или `...` → пауза 500ms
-    - `,` → короткий вдох
-    - `!` `?` → пауза предложения
     - двойной перенос строки → пауза 700ms
+    - одиночный перенос → 200ms
     """
     if not text:
         return text
 
-    # Сначала экранируем XML
     safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    # Многоточия → длинная пауза
     safe = re.sub(r"\.{3,}|…", '<break time="500ms"/>', safe)
-    # Двойной перенос строки → абзац
     safe = re.sub(r"\n\s*\n", '<break time="700ms"/>', safe)
-    # Одиночный перенос → запятая
     safe = re.sub(r"\n", '<break time="200ms"/>', safe)
-
     return f"<speak>{safe}</speak>"
 
 
@@ -153,18 +153,14 @@ class YandexSpeechKit:
         tone: str = "warm",
         use_ssml: bool = True,
     ) -> bytes | None:
-        """Синтез речи Yandex с SSML и эмоциями.
-
-        - voice: madirus / filipp / ermil / zahar / jane / oksana / ...
-        - tone: warm / calm / energetic / supportive / playful / clarifying
-        - use_ssml: True → автоматически расставляет паузы из «…»
-        """
+        """Синтез речи Yandex с SSML и эмоциями."""
         if not self.api_key:
             return None
 
-        emotion, speed = TONE_TO_YANDEX.get(tone, ("neutral", 1.0))
+        emotion, speed = TONE_TO_YANDEX.get(
+            tone, ("neutral", round(1.0 * SPEED_BOOST, 3))
+        )
 
-        # `madirus` поддерживает только neutral эмоцию (Yandex docs)
         if voice == "madirus":
             emotion = "neutral"
 
@@ -191,7 +187,6 @@ class YandexSpeechKit:
                         return await resp.read()
                     body = await resp.text()
                     logger.error("Yandex TTS %s: %s", resp.status, body[:200])
-                    # Если SSML не принялся — fallback на plain text
                     if use_ssml and resp.status in (400, 500):
                         return await self.synthesize(
                             text, voice=voice, tone=tone, use_ssml=False
@@ -255,7 +250,6 @@ class VoiceService:
         tone: str = "warm",
         prefer: str = "auto",  # auto | elevenlabs | yandex
     ) -> tuple[bytes | None, str]:
-        """Синтез речи. Дефолтный голос — madirus (мужской с сербским акцентом)."""
         if prefer in ("auto", "elevenlabs") and Config.ELEVENLABS_API_KEY:
             audio = await self._get_eleven().synthesize(text, tone=tone)
             if audio:
@@ -273,7 +267,6 @@ class VoiceService:
         voice: str = "madirus",
         tone: str = "warm",
     ) -> AsyncIterator[bytes]:
-        """Streaming TTS. ElevenLabs — chunked, Yandex — целым blob'ом."""
         if Config.ELEVENLABS_API_KEY:
             async for chunk in self._get_eleven().stream(text, tone=tone):
                 yield chunk
@@ -293,7 +286,6 @@ class VoiceService:
         return await self._get_hume().analyze(audio_bytes, content_type=content_type)
 
     def list_voices(self) -> dict[str, dict]:
-        """Возвращает каталог голосов."""
         return YANDEX_VOICES
 
     # Backward-compat
