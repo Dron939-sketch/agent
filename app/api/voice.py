@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
@@ -30,6 +31,18 @@ router = APIRouter(prefix="/api/voice", tags=["voice"])
 _detector = SemanticEndpointDetector()
 
 DEFAULT_VOICE = "madirus"  # Сербский баритон, ~ Милош Бикович
+
+# Wake word варианты для очистки транскрипта перед отправкой в LLM
+_WAKE_WORD_RE = re.compile(
+    r"^[\s,]*(?:фреди|фредди|фрэди|фрэдди|freddy|fredi)[\s,!.?]*",
+    re.IGNORECASE,
+)
+
+
+def strip_wake_word(text: str) -> str:
+    """Удаляет wake word 'Фреди' из начала транскрипта."""
+    cleaned = _WAKE_WORD_RE.sub("", text).strip()
+    return cleaned if cleaned else text
 
 
 class STTResponse(BaseModel):
@@ -212,7 +225,10 @@ async def full_loop(
     except Exception as exc:
         logger.warning("voice emotion failed: %s", exc)
 
-    intent = detect_intent(transcript)
+    # Удаляем wake word из начала транскрипта для обработки
+    clean_transcript = strip_wake_word(transcript)
+
+    intent = detect_intent(clean_transcript)
     intent_reply: str | None = None
     if intent.type == "remember" and intent.payload:
         await default_memory().add(
@@ -233,14 +249,49 @@ async def full_loop(
             if removed
             else f"Ничего такого в памяти не нашёл — {intent.payload}."
         )
+    elif intent.type == "remind" and intent.payload:
+        try:
+            from app.services.tasks import get_reminder_manager
+
+            mgr = get_reminder_manager()
+            result = await mgr.create_from_text(user.user_id, intent.payload, tz_offset=3)
+            title = result.get("title", intent.payload)
+            intent_reply = f"Напомню: «{title}»."
+        except ValueError:
+            intent_reply = f"Не разобрал время. Попробуй: «напомни завтра в 9 {intent.payload}»."
+        except Exception as exc:
+            logger.warning("voice remind failed: %s", exc)
+    elif intent.type == "task_create" and intent.payload:
+        try:
+            from app.services.tasks import get_reminder_manager
+
+            mgr = get_reminder_manager()
+            result = await mgr.create_from_text(user.user_id, intent.payload, tz_offset=3)
+            title = result.get("title", intent.payload)
+            intent_reply = f"Задача «{title}» добавлена."
+        except Exception as exc:
+            logger.warning("voice task_create failed: %s", exc)
+    elif intent.type == "task_list":
+        try:
+            from app.services.tasks import get_reminder_manager
+
+            mgr = get_reminder_manager()
+            reminders = await mgr.list_pending(user.user_id)
+            if not reminders:
+                intent_reply = "Нет активных напоминаний."
+            else:
+                lines = [f"• {r['title']}" for r in reminders[:5]]
+                intent_reply = "Твои напоминания:\n" + "\n".join(lines)
+        except Exception as exc:
+            logger.warning("voice task_list failed: %s", exc)
 
     convos = ConversationRepository(session)
     await convos.add(user.user_id, "user", transcript)
 
     emotion_service = EmotionService(default_router())
-    text_emo = emotion_service.detect_from_text(transcript)
+    text_emo = emotion_service.detect_from_text(clean_transcript)
     aggregator = ContextAggregator(session, emotion_service=emotion_service)
-    full_ctx = await aggregator.get_full_context(user.user_id, transcript)
+    full_ctx = await aggregator.get_full_context(user.user_id, clean_transcript)
 
     fused_primary = text_emo.primary
     fused_tone = text_emo.tone
@@ -269,7 +320,7 @@ async def full_loop(
         msgs: list[ChatMessage] = [ChatMessage(role="system", content=system_text)]
         for m in history_rows:
             msgs.append(ChatMessage(role=m["role"], content=m["content"]))  # type: ignore[arg-type]
-        msgs.append(ChatMessage(role="user", content=transcript))
+        msgs.append(ChatMessage(role="user", content=clean_transcript))
 
         response = await default_router().chat(msgs, profile="smart")  # type: ignore[arg-type]
         reply_text = response.text
@@ -288,7 +339,20 @@ async def full_loop(
         except Exception:
             pass
 
+    async def _auto_profile():
+        try:
+            from app.services.memory.knowledge_graph import auto_profile_after_dialogue
+
+            msgs = [
+                {"role": "user", "content": clean_transcript},
+                {"role": "assistant", "content": reply_text},
+            ]
+            await auto_profile_after_dialogue(user.user_id, msgs)
+        except Exception:
+            pass
+
     background.add_task(_store_memory)
+    background.add_task(_auto_profile)
 
     return FullLoopResponse(
         transcript=transcript,

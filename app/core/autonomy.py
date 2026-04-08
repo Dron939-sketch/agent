@@ -72,6 +72,23 @@ class AutonomyLoop:
         except Exception as exc:
             logger.warning("consolidate failed: %s", exc)
 
+        # Sprint 7: synthesize insights from knowledge graph
+        try:
+            from app.services.memory.knowledge_graph import synthesize_insights
+            from sqlalchemy import select
+            from app.db import User, session_scope
+
+            async with session_scope() as session:
+                result = await session.execute(select(User.user_id))
+                user_ids = [row[0] for row in result.all()]
+            total_insights = 0
+            for uid in user_ids:
+                total_insights += await synthesize_insights(uid)
+            if total_insights:
+                logger.info("🧠 daily insights synthesized: %d", total_insights)
+        except Exception as exc:
+            logger.warning("insight synthesis failed: %s", exc)
+
     async def _maybe_morning_brief(self) -> None:
         """Шлём утренний бриф в 9:00 локального времени пользователя.
 

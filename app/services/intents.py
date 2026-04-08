@@ -1,6 +1,7 @@
 """Детект явных команд пользователя в чате.
 
 ROUND 1: добавлены coach intents — goal_set / habit_create / habit_check.
+Sprint 8: добавлены reminder / task_create / task_list / task_cancel.
 """
 
 from __future__ import annotations
@@ -18,6 +19,10 @@ IntentType = Literal[
     "habit_create",
     "habit_check",
     "habit_list",
+    "remind",
+    "task_create",
+    "task_list",
+    "task_cancel",
     "none",
 ]
 
@@ -78,6 +83,37 @@ _HABIT_LIST_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(?i)список\s+привычек"),
 ]
 
+# === Sprint 8: Reminder & task intents ===
+_REMIND_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(?i)\bнапомни\s+(?:мне\s+)?(.+)$"),
+    re.compile(r"(?i)\bнапоминание[,:\s]+(.+)$"),
+    re.compile(r"(?i)\bпоставь\s+(?:мне\s+)?напоминание[,:\s]+(.+)$"),
+    re.compile(r"(?i)\bнапомни-ка\s+(.+)$"),
+    re.compile(r"(?i)\bне\s+дай\s+(?:мне\s+)?забыть[,:\s]+(.+)$"),
+    re.compile(r"(?i)\bнадо\s+не\s+забыть[,:\s]+(.+)$"),
+]
+
+_TASK_CREATE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(?i)\bдобавь\s+задачу[,:\s]+(.+)$"),
+    re.compile(r"(?i)\bзадача[,:\s—-]+(.+)$"),
+    re.compile(r"(?i)\bнужно\s+(?:будет\s+)?сделать[,:\s]+(.+)$"),
+    re.compile(r"(?i)\bзапиши\s+(?:в\s+)?(?:задачи|дела)[,:\s]+(.+)$"),
+]
+
+_TASK_LIST_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(?i)(?:покажи|расскажи)\s+(?:мои\s+)?(?:задачи|дела|напоминания)"),
+    re.compile(r"(?i)какие\s+у\s+меня\s+(?:задачи|дела|напоминания)"),
+    re.compile(r"(?i)список\s+(?:задач|дел|напоминаний)"),
+    re.compile(r"(?i)что\s+(?:мне\s+)?(?:нужно|надо)\s+сделать"),
+    re.compile(r"(?i)о\s+чём\s+(?:мне\s+)?напомнить"),
+]
+
+_TASK_CANCEL_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(?i)\bотмени\s+(?:напоминание|задачу)\s*(?:про\s+)?(.+)$"),
+    re.compile(r"(?i)\bудали\s+(?:напоминание|задачу)\s*(?:про\s+)?(.+)$"),
+    re.compile(r"(?i)\bне\s+надо\s+напоминать\s+(?:про\s+)?(.+)$"),
+]
+
 
 def detect_intent(text: str) -> Intent:
     """Возвращает Intent. Если ничего не подошло — type='none'."""
@@ -93,9 +129,28 @@ def detect_intent(text: str) -> Intent:
     for pat in _HABIT_LIST_PATTERNS:
         if pat.search(stripped):
             return Intent(type="habit_list")
+    for pat in _TASK_LIST_PATTERNS:
+        if pat.search(stripped):
+            return Intent(type="task_list")
     for pat in _LIST_PATTERNS:
         if pat.search(stripped):
             return Intent(type="list_memory")
+
+    # Напоминания проверяются раньше remember (т.к. «не дай забыть» vs «не забудь»)
+    for pat in _REMIND_PATTERNS:
+        m = pat.search(stripped)
+        if m:
+            return Intent(type="remind", payload=m.group(1).strip().rstrip(".!?"))
+
+    for pat in _TASK_CREATE_PATTERNS:
+        m = pat.search(stripped)
+        if m:
+            return Intent(type="task_create", payload=m.group(1).strip().rstrip(".!?"))
+
+    for pat in _TASK_CANCEL_PATTERNS:
+        m = pat.search(stripped)
+        if m:
+            return Intent(type="task_cancel", payload=m.group(1).strip().rstrip(".!?"))
 
     # remember проверяется раньше forget (т.к. «не забудь» содержит «забудь»)
     for pat in _REMEMBER_PATTERNS:

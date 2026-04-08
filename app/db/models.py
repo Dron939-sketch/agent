@@ -233,3 +233,47 @@ class ChatSession(Base):
     )
     ended_at: Mapped[Optional[datetime]]
     message_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# ============== Sprint 7: Knowledge Graph ==============
+
+
+class KnowledgeFact(Base):
+    """Структурированный факт о пользователе: сущность → отношение → значение."""
+
+    __tablename__ = "fr_knowledge_facts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    subject: Mapped[str] = mapped_column(String, index=True)        # "пользователь", "жена", "проект"
+    predicate: Mapped[str] = mapped_column(String, index=True)      # "зовут", "работает в", "любит"
+    object: Mapped[str] = mapped_column(String)                     # "Андрей", "Google", "итальянскую кухню"
+    category: Mapped[str] = mapped_column(String, index=True)       # personal/preference/goal/habit/relation/work/health
+    confidence: Mapped[float] = mapped_column(Float, default=0.8)   # 0..1
+    importance: Mapped[int] = mapped_column(Integer, default=5)     # 1-10
+    source: Mapped[str] = mapped_column(String, default="auto")     # auto/explicit/voice
+    valid_from: Mapped[Optional[datetime]] = mapped_column()
+    valid_until: Mapped[Optional[datetime]] = mapped_column()       # None = forever
+    superseded_by: Mapped[Optional[int]] = mapped_column(Integer)   # id of newer fact
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), index=True
+    )
+
+
+class UserInsight(Base):
+    """Высокоуровневый инсайт о пользователе, синтезированный из фактов."""
+
+    __tablename__ = "fr_user_insights"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    category: Mapped[str] = mapped_column(String, index=True)       # routine/personality/values/communication_style
+    insight: Mapped[str] = mapped_column(Text)                      # "Предпочитает краткие ответы без воды"
+    evidence_count: Mapped[int] = mapped_column(Integer, default=1) # Сколько фактов подтверждают
+    confidence: Mapped[float] = mapped_column(Float, default=0.6)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )

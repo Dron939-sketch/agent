@@ -378,3 +378,64 @@ export async function getIntegrations(): Promise<Record<string, unknown>> {
   if (!res.ok) throw new Error(`integrations ${res.status}`);
   return res.json();
 }
+
+// === Reminders (Sprint 8) ===
+
+export type ReminderInfo = {
+  id?: number;
+  task_id?: number;
+  title: string;
+  scheduled_at?: string | null;
+  recurrence?: string | null;
+  created_at?: string | null;
+};
+
+export async function createReminder(
+  text: string,
+  tzOffset = 3
+): Promise<ReminderInfo> {
+  const res = await fetch(`${API}/api/reminders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ text, tz_offset: tzOffset })
+  });
+  if (!res.ok) throw new Error(`reminder ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+export async function listReminders(): Promise<{ reminders: ReminderInfo[]; count: number }> {
+  const res = await fetch(`${API}/api/reminders`, {
+    headers: { ...authHeaders() }
+  });
+  if (!res.ok) throw new Error(`reminders ${res.status}`);
+  return res.json();
+}
+
+// === Triggers (Sprint 6) ===
+
+export type TriggerEvent = {
+  type: "trigger" | "ping";
+  source?: string;
+  message?: string;
+  title?: string;
+  priority?: string;
+  data?: Record<string, unknown>;
+};
+
+export function openTriggerSocket(
+  onEvent: (evt: TriggerEvent) => void,
+  onClose?: () => void
+): WebSocket | null {
+  const token = getToken();
+  if (!token) return null;
+  const wsBase = API.startsWith("https") ? API.replace("https", "wss") : API.replace("http", "ws");
+  const ws = new WebSocket(`${wsBase}/api/triggers/ws?token=${encodeURIComponent(token)}`);
+  ws.onmessage = (ev) => {
+    try {
+      onEvent(JSON.parse(ev.data));
+    } catch {}
+  };
+  ws.onclose = () => onClose?.();
+  ws.onerror = () => onClose?.();
+  return ws;
+}
