@@ -3,19 +3,34 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
-import { LogIn, LogOut } from "lucide-react";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { AgentTimeline } from "@/components/timeline/AgentTimeline";
 import { DashboardTiles } from "@/components/dashboard/DashboardTiles";
 import { MoodGraph } from "@/components/dashboard/MoodGraph";
-import { RemindersWidget } from "@/components/dashboard/RemindersWidget";
-import { NotificationPanel } from "@/components/dashboard/NotificationPanel";
-import { KnowledgeGraph } from "@/components/dashboard/KnowledgeGraph";
 import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
-import { useSession } from "@/store/session";
 
 const FreddyAvatar = dynamic(
   () => import("@/components/avatar/FreddyAvatar").then((m) => m.FreddyAvatar),
+  { ssr: false }
+);
+
+// Эти виджеты рендерятся на основе persisted Zustand-стейта (token из
+// localStorage). На SSR token = null, на клиенте после hydration — string.
+// Чтобы не было hydration mismatch (#418/#423), рендерим только на клиенте.
+const RemindersWidget = dynamic(
+  () => import("@/components/dashboard/RemindersWidget").then((m) => m.RemindersWidget),
+  { ssr: false }
+);
+const NotificationPanel = dynamic(
+  () => import("@/components/dashboard/NotificationPanel").then((m) => m.NotificationPanel),
+  { ssr: false }
+);
+const KnowledgeGraph = dynamic(
+  () => import("@/components/dashboard/KnowledgeGraph").then((m) => m.KnowledgeGraph),
+  { ssr: false }
+);
+const HeaderAuth = dynamic(
+  () => import("@/components/layout/HeaderAuth").then((m) => m.HeaderAuth),
   { ssr: false }
 );
 
@@ -23,18 +38,6 @@ type AgentState = "idle" | "thinking" | "speaking";
 
 export default function HomePage() {
   const [agentState, setAgentState] = useState<AgentState>("idle");
-  const token = useSession((s) => s.token);
-  const username = useSession((s) => s.username);
-  const logout = useSession((s) => s.logout);
-
-  function openAuth() {
-    window.dispatchEvent(new CustomEvent("freddy:open-auth"));
-  }
-
-  function doLogout() {
-    localStorage.removeItem("freddy_token");
-    logout();
-  }
 
   return (
     <main className="relative min-h-screen">
@@ -60,22 +63,7 @@ export default function HomePage() {
           <kbd className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-slate-400">
             ⌘K
           </kbd>
-          {token ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-300">@{username}</span>
-              <button
-                onClick={doLogout}
-                className="flex items-center gap-1 rounded-lg border border-white/10 px-3 py-1 text-xs hover:border-neon-pink/40 hover:text-white"
-              >
-                <LogOut className="h-3 w-3" />
-                Выйти
-              </button>
-            </div>
-          ) : (
-            <button onClick={openAuth} className="btn-primary px-4 py-2 text-xs">
-              <LogIn className="mr-1 h-3 w-3" /> Войти
-            </button>
-          )}
+          <HeaderAuth />
         </nav>
       </header>
 
