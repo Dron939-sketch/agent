@@ -1,6 +1,7 @@
 """SQLAlchemy 2.0 декларативные модели Фреди.
 
 Все таблицы с префиксом `fr_*`.
+ROUND 1: + Goal, HabitCheck, ChatSession.
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ class Conversation(Base):
     role: Mapped[str] = mapped_column(String)
     content: Mapped[str] = mapped_column(Text)
     extra_metadata: Mapped[Optional[str]] = mapped_column("metadata", Text)
+    chat_session_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.current_timestamp(), index=True
     )
@@ -111,14 +113,14 @@ class Repository(Base):
 
 
 class Memory(Base):
-    """Персистентная векторная память: текст + эмбеддинг (JSON-массив float)."""
+    """Персистентная векторная память."""
 
     __tablename__ = "fr_memories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String, index=True)
     text: Mapped[str] = mapped_column(Text)
-    embedding: Mapped[str] = mapped_column(Text)  # JSON-массив
+    embedding: Mapped[str] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(String, default="message")
     extra_metadata: Mapped[Optional[str]] = mapped_column("metadata", Text)
     created_at: Mapped[datetime] = mapped_column(
@@ -127,8 +129,6 @@ class Memory(Base):
 
 
 class PushSubscription(Base):
-    """Web Push subscription (по одному на endpoint)."""
-
     __tablename__ = "fr_push_subscriptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -139,8 +139,6 @@ class PushSubscription(Base):
 
 
 class EmotionEvent(Base):
-    """Эмоциональная история пользователя."""
-
     __tablename__ = "fr_emotion_history"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -157,21 +155,81 @@ class EmotionEvent(Base):
 
 
 class Feedback(Base):
-    """Лайки/дизлайки на ответы Фреди (Sprint 1).
-
-    Используется для:
-    - Ранжирования будущих рекомендаций
-    - Сигнала «не повторять плохой совет» в memory extractor
-    - LLM-as-judge eval pipeline
-    """
-
     __tablename__ = "fr_feedback"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String, index=True)
     message_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
-    score: Mapped[int] = mapped_column(Integer)  # +1 like, -1 dislike
+    score: Mapped[int] = mapped_column(Integer)
     note: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.current_timestamp(), index=True
     )
+
+
+# ============== ROUND 1: Life-coach features ==============
+
+
+class Goal(Base):
+    """Цель пользователя — то, к чему он движется."""
+
+    __tablename__ = "fr_goals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String, default="active", index=True)  # active/done/paused/dropped
+    target_date: Mapped[Optional[datetime]]
+    progress_pct: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+
+class Habit(Base):
+    """Привычка пользователя — повторяющееся действие."""
+
+    __tablename__ = "fr_habits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    title: Mapped[str] = mapped_column(String)
+    cadence: Mapped[str] = mapped_column(String, default="daily")  # daily/weekly/custom
+    streak: Mapped[int] = mapped_column(Integer, default=0)
+    longest_streak: Mapped[int] = mapped_column(Integer, default=0)
+    last_check_at: Mapped[Optional[datetime]] = mapped_column(index=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())
+
+
+class HabitCheck(Base):
+    """Отметка выполнения привычки за день."""
+
+    __tablename__ = "fr_habit_checks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    habit_id: Mapped[int] = mapped_column(ForeignKey("fr_habits.id"), index=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    note: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), index=True
+    )
+
+
+class ChatSession(Base):
+    """Эпизодическая сессия чата (для ROUND 3)."""
+
+    __tablename__ = "fr_chat_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    title: Mapped[Optional[str]] = mapped_column(String)
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), index=True
+    )
+    ended_at: Mapped[Optional[datetime]]
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
