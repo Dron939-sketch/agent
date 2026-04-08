@@ -14,9 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db import (
+    ChatSessionRepository,
     ConversationRepository,
     EmotionRepository,
     KnowledgeRepository,
+    MemoryRepository,
     UserRepository,
 )
 from app.services.emotion import EmotionResult, EmotionService
@@ -32,6 +34,8 @@ class FullContext:
     recalled: list[str] = field(default_factory=list)
     knowledge_prompt: str = ""  # Sprint 7: граф знаний
     situation_prompt: str = ""  # Sprint 10: ситуационный контекст
+    lessons: list[str] = field(default_factory=list)  # ROUND 2: feedback lessons
+    episodes: list[dict[str, str]] = field(default_factory=list)  # ROUND 3: past sessions
     emotion: EmotionResult | None = None
     emotion_trend: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
@@ -109,6 +113,33 @@ class ContextAggregator:
             logger.warning("situation context failed: %s", exc)
             ctx.situation_prompt = ""
 
+        # 8. ROUND 2: Уроки от обратной связи (анти-паттерны + позитивные примеры)
+        try:
+            lessons_rows = await MemoryRepository(self.session).list_by_kind(
+                user_id, kind="lesson", limit=5
+            )
+            ctx.lessons = [row.text for row in lessons_rows]
+        except Exception as exc:
+            logger.warning("lessons fetch failed: %s", exc)
+            ctx.lessons = []
+
+        # 9. ROUND 3: Эпизодическая память — сводки прошлых сессий
+        try:
+            chat_sessions = await ChatSessionRepository(self.session).list_with_summary(
+                user_id, limit=3
+            )
+            ctx.episodes = [
+                {
+                    "title": cs.title or "Диалог",
+                    "summary": cs.summary or "",
+                }
+                for cs in chat_sessions
+                if cs.summary
+            ]
+        except Exception as exc:
+            logger.warning("episodic recall failed: %s", exc)
+            ctx.episodes = []
+
         return ctx
 
     @staticmethod
@@ -143,6 +174,26 @@ class ContextAggregator:
         if ctx.recalled:
             memo = "\n".join(f"- {t}" for t in ctx.recalled)
             parts.append(f"РЕЛЕВАНТНАЯ ПАМЯТЬ:\n{memo}")
+
+        # ROUND 3: Эпизодическая память — сводки прошлых сессий
+        if ctx.episodes:
+            ep_lines = "\n".join(
+                f"- «{ep['title']}» — {ep['summary']}" for ep in ctx.episodes
+            )
+            parts.append(
+                "ПРЕДЫДУЩИЕ ЭПИЗОДЫ (чем вы занимались раньше):\n"
+                f"{ep_lines}\n"
+                "Можешь ссылаться на них, если уместно."
+            )
+
+        # ROUND 2: Уроки от feedback (анти-паттерны + позитивные примеры)
+        if ctx.lessons:
+            lessons_text = "\n".join(f"- {l}" for l in ctx.lessons)
+            parts.append(
+                "УРОКИ ОТ ПОЛЬЗОВАТЕЛЯ (feedback):\n"
+                f"{lessons_text}\n"
+                "Избегай стиля, помеченного ❌. Опирайся на ✅."
+            )
 
         # Sprint 11: Dialogue instructions
         try:

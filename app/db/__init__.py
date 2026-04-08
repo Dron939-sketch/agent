@@ -1,5 +1,6 @@
 """Database layer."""
 
+from .chat_session_repo import ChatSessionRepository
 from .coach_repos import GoalRepository, HabitRepository
 from .models import (
     Backup,
@@ -68,6 +69,7 @@ __all__ = [
     "FeedbackRepository",
     "GoalRepository",
     "HabitRepository",
+    "ChatSessionRepository",
     "get_engine",
     "get_sessionmaker",
     "session_scope",

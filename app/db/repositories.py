@@ -98,12 +98,21 @@ class ConversationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def add(self, user_id: str, role: str, content: str, metadata: dict[str, Any] | None = None) -> int:
+    async def add(
+        self,
+        user_id: str,
+        role: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        chat_session_id: int | None = None,
+    ) -> int:
         conv = Conversation(
             user_id=user_id,
             role=role,
             content=content,
             extra_metadata=json.dumps(metadata or {}),
+            chat_session_id=chat_session_id,
         )
         self.session.add(conv)
         await self.session.flush()
@@ -118,7 +127,13 @@ class ConversationRepository:
         )
         rows = result.scalars().all()
         return [
-            {"id": r.id, "role": r.role, "content": r.content, "timestamp": r.created_at}
+            {
+                "id": r.id,
+                "role": r.role,
+                "content": r.content,
+                "timestamp": r.created_at,
+                "chat_session_id": r.chat_session_id,
+            }
             for r in reversed(rows)
         ]
 
@@ -254,6 +269,18 @@ class MemoryRepository:
         result = await self.session.execute(
             select(Memory)
             .where(Memory.user_id == user_id)
+            .order_by(Memory.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def list_by_kind(
+        self, user_id: str, kind: str, limit: int = 10
+    ) -> list[Memory]:
+        """Последние записи заданного kind (например, ``lesson``)."""
+        result = await self.session.execute(
+            select(Memory)
+            .where(Memory.user_id == user_id, Memory.kind == kind)
             .order_by(Memory.id.desc())
             .limit(limit)
         )
