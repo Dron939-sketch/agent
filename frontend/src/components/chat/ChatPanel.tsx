@@ -62,11 +62,12 @@ export function ChatPanel({ id, onStateChange }: Props) {
   const token = useSession((s) => s.token);
   const voiceReply = useSession((s) => s.voiceReply);
   const setVoiceReply = useSession((s) => s.setVoiceReply);
+  const voice = useSession((s) => s.voice);
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
       content:
-        "Привет! Я Фреди — твой всемогущий AI-помощник. Войди или зарегистрируйся, и можем начинать."
+        "Привет… я Фреди — твой всемогущий AI-помощник. Войди или зарегистрируйся, и можем начинать."
     }
   ]);
   const [input, setInput] = useState("");
@@ -97,7 +98,10 @@ export function ChatPanel({ id, onStateChange }: Props) {
     if (!voiceReply || !text.trim()) return;
     stopAudio();
     try {
-      const url = await streamSpeech(text.slice(0, 1500), { tone: tone ?? "warm" });
+      const url = await streamSpeech(text.slice(0, 1500), {
+        tone: tone ?? "warm",
+        voice
+      });
       const audio = new Audio(url);
       playerRef.current = audio;
       onStateChange?.("speaking");
@@ -117,7 +121,6 @@ export function ChatPanel({ id, onStateChange }: Props) {
       };
       await audio.play();
     } catch {
-      // если TTS не настроен на бекенде — тихо игнорим, текст уже показан
       onStateChange?.("idle");
     }
   }
@@ -129,7 +132,6 @@ export function ChatPanel({ id, onStateChange }: Props) {
       return;
     }
 
-    // Если Фреди говорит — прервать его при новой реплике (barge-in lite)
     stopAudio();
 
     const user = input.trim();
@@ -138,7 +140,6 @@ export function ChatPanel({ id, onStateChange }: Props) {
     setBusy(true);
     onStateChange?.("thinking");
 
-    // 1. Image generation intent
     const imagePrompt = detectImageGenIntent(user);
     if (imagePrompt) {
       try {
@@ -172,12 +173,10 @@ export function ChatPanel({ id, onStateChange }: Props) {
       return;
     }
 
-    // 2. Обычный чат: streaming + одновременно полный POST для метаданных
     try {
       let acc = "";
       setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
-      // Параллельно стартуем streamChat (для бубла) и sendChat (для emotion+id)
       const metaPromise = sendChat(user, { profile: "smart" }).catch(() => null);
 
       await streamChat(user, (chunk) => {
@@ -208,7 +207,6 @@ export function ChatPanel({ id, onStateChange }: Props) {
         });
       }
 
-      // Авто-озвучка ответа (если включено)
       const finalText = (meta?.reply ?? acc) || acc;
       if (voiceReply && finalText.trim()) {
         await speakReply(finalText, meta?.tone);
@@ -290,7 +288,6 @@ export function ChatPanel({ id, onStateChange }: Props) {
     setVoiceReply(!voiceReply);
   }
 
-  // Welcome после логина
   useEffect(() => {
     if (token) {
       setMessages((m) => {
@@ -299,14 +296,13 @@ export function ChatPanel({ id, onStateChange }: Props) {
           ...m,
           {
             role: "assistant",
-            content: "✅ Подключился. Расскажи, что у тебя сегодня — помогу разобраться."
+            content: "✅ Подключился… расскажи, что у тебя сегодня — помогу разобраться."
           }
         ];
       });
     }
   }, [token]);
 
-  // Cleanup при размонтировании
   useEffect(() => () => stopAudio(), []);
 
   return (
@@ -314,6 +310,9 @@ export function ChatPanel({ id, onStateChange }: Props) {
       <div className="mb-3 flex items-center gap-2 text-sm text-slate-300">
         <Sparkles className="h-4 w-4 text-neon-violet" />
         <span>Диалог с Фреди</span>
+        <span className="text-[10px] uppercase tracking-wider text-slate-500">
+          · {voice}
+        </span>
         <button
           onClick={toggleVoiceReply}
           className={`ml-auto rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition ${

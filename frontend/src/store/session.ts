@@ -12,13 +12,15 @@ type SessionState = {
   profile: Profile;
   locale: Locale;
   onboarded: boolean;
-  /** Озвучивать ли каждый ответ Фреди в чате (Sprint 3.5). */
   voiceReply: boolean;
+  /** Голос TTS — id из каталога Yandex/ElevenLabs (madirus, filipp, jane, ...). */
+  voice: string;
   setAuth: (token: string, username: string) => void;
   logout: () => void;
   setProfile: (p: Profile) => void;
   setLocale: (l: Locale) => void;
   setVoiceReply: (v: boolean) => void;
+  setVoice: (v: string) => void;
   markOnboarded: () => void;
 };
 
@@ -31,11 +33,13 @@ export const useSession = create<SessionState>()(
       locale: "ru",
       onboarded: false,
       voiceReply: true,
+      voice: "madirus",
       setAuth: (token, username) => set({ token, username }),
       logout: () => set({ token: null, username: null }),
       setProfile: (profile) => set({ profile }),
       setLocale: (locale) => set({ locale }),
       setVoiceReply: (voiceReply) => set({ voiceReply }),
+      setVoice: (voice) => set({ voice }),
       markOnboarded: () => set({ onboarded: true })
     }),
     {
@@ -46,7 +50,8 @@ export const useSession = create<SessionState>()(
         profile: s.profile,
         locale: s.locale,
         onboarded: s.onboarded,
-        voiceReply: s.voiceReply
+        voiceReply: s.voiceReply,
+        voice: s.voice
       })
     }
   )

@@ -47,13 +47,14 @@ export type FullLoopResponse = {
   audio_url: string | null;
 };
 
-/**
- * Резолв URL бекенда:
- *   1. NEXT_PUBLIC_API_URL — задан при билде (render.yaml).
- *   2. Если фронт развёрнут на agent-frontend-*.onrender.com — авто-маппим
- *      на agent-ynlg.onrender.com (бекенд из этого репозитория).
- *   3. Локально fallback на http://localhost:8000.
- */
+export type VoiceInfo = {
+  id: string;
+  label: string;
+  gender?: string | null;
+  accent?: string | null;
+  default?: boolean;
+};
+
 export function resolveApiUrl(): string {
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl) return envUrl.replace(/\/$/, "");
@@ -89,7 +90,14 @@ function getToken(): string | null {
 export async function sendChat(
   message: string,
   opts: { profile?: string; useMemory?: boolean } = {}
-): Promise<{ reply: string; model: string; recalled: string[]; emotion?: string; tone?: string; message_id?: number }> {
+): Promise<{
+  reply: string;
+  model: string;
+  recalled: string[];
+  emotion?: string;
+  tone?: string;
+  message_id?: number;
+}> {
   const res = await fetch(`${API}/api/chat/`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -148,7 +156,7 @@ export async function streamChat(
   }
 }
 
-// === Agents (REST + WS) ===
+// === Agents ===
 
 export function openAgentSocket(
   payload: { task: string; mode?: "single" | "pipeline"; profile?: string },
@@ -188,6 +196,12 @@ export async function transcribeAudio(audio: Blob): Promise<{ text: string; prov
   return res.json();
 }
 
+export async function listVoices(): Promise<VoiceInfo[]> {
+  const res = await fetch(`${API}/api/voice/voices`);
+  if (!res.ok) throw new Error(`voices ${res.status}`);
+  return res.json();
+}
+
 export async function synthesizeSpeech(
   text: string,
   opts: { voice?: string; tone?: string; prefer?: "auto" | "elevenlabs" | "yandex" } = {}
@@ -197,7 +211,7 @@ export async function synthesizeSpeech(
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({
       text,
-      voice: opts.voice ?? "jane",
+      voice: opts.voice ?? "madirus",
       tone: opts.tone ?? "warm",
       prefer: opts.prefer ?? "auto"
     })
@@ -206,22 +220,20 @@ export async function synthesizeSpeech(
   return res.blob();
 }
 
-/**
- * Streaming TTS — возвращает MediaSource URL, который можно сразу отдать
- * `<audio src=...>`. Если ElevenLabs не настроен, fallback на обычный
- * synthesizeSpeech().
- */
 export async function streamSpeech(
   text: string,
-  opts: { tone?: string } = {}
+  opts: { voice?: string; tone?: string } = {}
 ): Promise<string> {
   const res = await fetch(`${API}/api/voice/tts/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ text, tone: opts.tone ?? "warm" })
+    body: JSON.stringify({
+      text,
+      voice: opts.voice ?? "madirus",
+      tone: opts.tone ?? "warm"
+    })
   });
   if (!res.ok || !res.body) {
-    // fallback на синхронный
     const blob = await synthesizeSpeech(text, opts);
     return URL.createObjectURL(blob);
   }
@@ -229,10 +241,6 @@ export async function streamSpeech(
   return URL.createObjectURL(blob);
 }
 
-/**
- * Полный голосовой цикл: audio in → STT + voice emotion → LLM → reply.
- * Одна сетевая поездка вместо четырёх.
- */
 export async function voiceFullLoop(audio: Blob): Promise<FullLoopResponse> {
   const fd = new FormData();
   fd.append("audio", audio, "voice.webm");
@@ -298,7 +306,7 @@ export async function subscribePush(subscription: PushSubscriptionJSON): Promise
   if (!res.ok) throw new Error(`subscribe ${res.status}`);
 }
 
-// === Feedback (Sprint 1) ===
+// === Feedback ===
 
 export async function sendFeedback(
   score: 1 | -1 | 0,
@@ -335,8 +343,6 @@ export async function ping(): Promise<boolean> {
     return false;
   }
 }
-
-// === Integrations status ===
 
 export async function getIntegrations(): Promise<Record<string, unknown>> {
   const res = await fetch(`${API}/integrations`);
