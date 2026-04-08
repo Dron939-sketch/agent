@@ -18,11 +18,16 @@ import {
   Sparkles,
   Volume2,
   VolumeX,
-  Workflow
+  Workflow,
+  Ear,
+  Bell,
+  Brain,
+  Calendar,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { listVoices, type VoiceInfo } from "@/lib/api";
 import { useSession } from "@/store/session";
+import { isWakeWordSupported } from "@/lib/wakeword";
 
 function RenderResults() {
   const { results } = useMatches();
@@ -67,6 +72,9 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const setVoice = useSession((s) => s.setVoice);
   const token = useSession((s) => s.token);
   const logout = useSession((s) => s.logout);
+  const alwaysListening = useSession((s) => s.alwaysListening);
+  const setAlwaysListening = useSession((s) => s.setAlwaysListening);
+  const wakeSupported = isWakeWordSupported();
 
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
 
@@ -176,7 +184,37 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       section: "Язык",
       icon: <Languages className="h-4 w-4 text-neon-lime" />,
       perform: () => setLocale("en")
-    }
+    },
+    // Sprint 6-8: Wake word, reminders, triggers
+    ...(wakeSupported
+      ? [
+          {
+            id: "wake-toggle",
+            name: alwaysListening ? "Выключить режим «Фреди»" : "Включить режим «Фреди» (wake word)",
+            shortcut: ["g", "f"],
+            keywords: "wake фреди freddy listen always голос",
+            section: "Фреди",
+            icon: <Ear className="h-4 w-4 text-green-400" />,
+            perform: () => setAlwaysListening(!alwaysListening)
+          }
+        ]
+      : []),
+    {
+      id: "nav-reminders",
+      name: "Мои напоминания",
+      keywords: "reminders tasks напоминания задачи",
+      section: "Фреди",
+      icon: <Bell className="h-4 w-4 text-amber-400" />,
+      perform: () => scrollTo("dashboard")
+    },
+    {
+      id: "nav-knowledge",
+      name: "Граф знаний",
+      keywords: "knowledge graph факты память профиль",
+      section: "Фреди",
+      icon: <Brain className="h-4 w-4 text-neon-violet" />,
+      perform: () => scrollTo("dashboard")
+    },
   ];
 
   const voiceActions = voices.map((v) => ({
