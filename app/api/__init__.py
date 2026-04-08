@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -79,6 +80,40 @@ async def lifespan(_app: FastAPI):  # noqa: ANN201
         logger.info("👋 shutdown complete")
 
 
+def _resolve_cors_origins() -> list[str]:
+    """Явный список фронтовых origin'ов.
+
+    Render иногда капризничает с `allow_origin_regex` на preflight'ах
+    (особенно, когда контейнер ещё прогревается). Явный список — самый
+    надёжный вариант: браузер получает точное значение
+    `Access-Control-Allow-Origin` и не отбрасывает ответ.
+    """
+    defaults = [
+        "https://agent-frontend-fxtv.onrender.com",
+        "https://agent-frontend.onrender.com",
+        "https://agent-ynlg.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",
+    ]
+    extra = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
+    if extra:
+        defaults.extend(
+            origin.strip().rstrip("/")
+            for origin in extra.split(",")
+            if origin.strip()
+        )
+    # dedupe, stable order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for origin in defaults:
+        if origin not in seen:
+            seen.add(origin)
+            unique.append(origin)
+    return unique
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title=Config.APP_NAME,
@@ -88,10 +123,13 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
+        allow_origins=_resolve_cors_origins(),
         allow_origin_regex=r"https?://(.*\.onrender\.com|localhost(:\d+)?|127\.0\.0\.1(:\d+)?)",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],
+        max_age=600,
     )
 
     app.include_router(system_router.router)
