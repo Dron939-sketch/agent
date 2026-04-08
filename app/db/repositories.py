@@ -259,6 +259,18 @@ class MemoryRepository:
         )
         return list(result.scalars().all())
 
+    async def list_by_kind(
+        self, user_id: str, kind: str, limit: int = 10
+    ) -> list[Memory]:
+        """Последние записи заданного kind (например, ``lesson``)."""
+        result = await self.session.execute(
+            select(Memory)
+            .where(Memory.user_id == user_id, Memory.kind == kind)
+            .order_by(Memory.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def count_for_user(self, user_id: str) -> int:
         result = await self.session.execute(
             select(func.count()).select_from(Memory).where(Memory.user_id == user_id)
