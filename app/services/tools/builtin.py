@@ -1,4 +1,4 @@
-"""Встроенные tools: время, калькулятор, fetch URL, web search."""
+"""Встроенные tools: время, калькулятор, fetch URL, web search, погода."""
 
 from __future__ import annotations
 
@@ -79,3 +79,61 @@ async def web_search(query: str, max_results: int = 5) -> str:
         )
     except Exception as exc:
         return f"error: {exc}"
+
+
+@tool(
+    name="weather",
+    description="Возвращает текущую погоду в указанном городе (через OpenWeatherMap). Принимает русское или английское название города.",
+)
+async def weather(city: str) -> str:
+    """Текущая погода: температура, ощущается, влажность, описание, ветер."""
+    try:
+        from app.services.weather import WeatherService
+
+        result = await WeatherService().get(city)
+        if not result:
+            return f"Не получилось узнать погоду для «{city}» (нужен OPENWEATHER_API_KEY)."
+        parts = [
+            f"Погода в {result.get('city', city)}:",
+            f"- Температура: {result.get('temperature')}°C (ощущается {result.get('feels_like')}°C)",
+            f"- Описание: {result.get('description', '—')}",
+            f"- Влажность: {result.get('humidity')}%",
+            f"- Ветер: {result.get('wind_speed')} м/с",
+        ]
+        return "\n".join(parts)
+    except Exception as exc:
+        return f"weather error: {exc}"
+
+
+@tool(
+    name="github_repo_info",
+    description="Возвращает базовую информацию о GitHub-репозитории (stars, открытые issue, последний коммит).",
+)
+async def github_repo_info(owner: str, repo: str) -> str:
+    """Лёгкая обёртка над GitHub REST API."""
+    try:
+        import os
+
+        headers = {"Accept": "application/vnd.github+json"}
+        token = os.environ.get("GITHUB_TOKEN", "")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.github.com/repos/{owner}/{repo}",
+                headers=headers,
+                timeout=15,
+            ) as resp:
+                if resp.status != 200:
+                    return f"github error {resp.status}"
+                data = await resp.json()
+        return (
+            f"{data.get('full_name')}\n"
+            f"⭐ {data.get('stargazers_count', 0)} · "
+            f"🐛 {data.get('open_issues_count', 0)} open issues · "
+            f"🔧 {data.get('language', '?')}\n"
+            f"{data.get('description', '')}\n"
+            f"Updated: {data.get('updated_at', '')}"
+        )
+    except Exception as exc:
+        return f"github error: {exc}"
