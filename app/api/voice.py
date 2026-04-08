@@ -249,6 +249,41 @@ async def full_loop(
             if removed
             else f"Ничего такого в памяти не нашёл — {intent.payload}."
         )
+    elif intent.type == "remind" and intent.payload:
+        try:
+            from app.services.tasks import get_reminder_manager
+
+            mgr = get_reminder_manager()
+            result = await mgr.create_from_text(user.user_id, intent.payload, tz_offset=3)
+            title = result.get("title", intent.payload)
+            intent_reply = f"Напомню: «{title}»."
+        except ValueError:
+            intent_reply = f"Не разобрал время. Попробуй: «напомни завтра в 9 {intent.payload}»."
+        except Exception as exc:
+            logger.warning("voice remind failed: %s", exc)
+    elif intent.type == "task_create" and intent.payload:
+        try:
+            from app.services.tasks import get_reminder_manager
+
+            mgr = get_reminder_manager()
+            result = await mgr.create_from_text(user.user_id, intent.payload, tz_offset=3)
+            title = result.get("title", intent.payload)
+            intent_reply = f"Задача «{title}» добавлена."
+        except Exception as exc:
+            logger.warning("voice task_create failed: %s", exc)
+    elif intent.type == "task_list":
+        try:
+            from app.services.tasks import get_reminder_manager
+
+            mgr = get_reminder_manager()
+            reminders = await mgr.list_pending(user.user_id)
+            if not reminders:
+                intent_reply = "Нет активных напоминаний."
+            else:
+                lines = [f"• {r['title']}" for r in reminders[:5]]
+                intent_reply = "Твои напоминания:\n" + "\n".join(lines)
+        except Exception as exc:
+            logger.warning("voice task_list failed: %s", exc)
 
     convos = ConversationRepository(session)
     await convos.add(user.user_id, "user", transcript)

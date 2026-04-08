@@ -22,6 +22,7 @@ from . import coach as coach_router
 from . import dashboard as dashboard_router
 from . import feedback as feedback_router
 from . import push as push_router
+from . import reminders as reminders_router
 from . import system as system_router
 from . import vision as vision_router
 from . import voice as voice_router
@@ -37,6 +38,15 @@ async def lifespan(_app: FastAPI):  # noqa: ANN201
     await init_db()
     plugins = load_plugins()
 
+    # Sprint 8: Register reminder handler with scheduler
+    from app.services.scheduler import TaskScheduler
+    from app.services.tasks import get_reminder_manager
+
+    scheduler = TaskScheduler()
+    manager = get_reminder_manager()
+    scheduler.register("reminder", manager.handle_reminder)
+    await scheduler.start()
+
     autonomy = get_autonomy_loop()
     await autonomy.start()
 
@@ -51,6 +61,7 @@ async def lifespan(_app: FastAPI):  # noqa: ANN201
     try:
         yield
     finally:
+        await scheduler.stop()
         await autonomy.stop()
         await dispose_db()
         logger.info("👋 shutdown complete")
@@ -82,6 +93,7 @@ def create_app() -> FastAPI:
     app.include_router(brief_router.router)
     app.include_router(dashboard_router.router)
     app.include_router(coach_router.router)
+    app.include_router(reminders_router.router)
 
     return app
 

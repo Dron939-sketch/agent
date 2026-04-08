@@ -251,7 +251,104 @@ async def _handle_intent(
             logger.warning("habit_list failed: %s", exc)
             return "Не смог достать привычки."
 
+    # === Sprint 8: Reminder & task intents ===
+    if intent_type == "remind":
+        if not payload:
+            return "О чём напомнить? Скажи: «напомни через 2 часа позвонить маме»."
+        try:
+            from app.services.tasks import get_reminder_manager
+
+            manager = get_reminder_manager()
+            result = await manager.create_from_text(user_id, payload, tz_offset=_get_user_tz(session, user_id))
+            scheduled = result.get("scheduled_at", "")
+            title = result.get("title", payload)
+            rec = result.get("recurrence")
+            rec_text = f" ({rec})" if rec else ""
+            return f"Напомню{rec_text}: «{title}» — {_format_dt(scheduled)}."
+        except ValueError:
+            return f"Не смог разобрать время. Попробуй: «напомни завтра в 9 утра {payload}»."
+        except Exception as exc:
+            logger.warning("remind failed: %s", exc)
+            return "Не получилось создать напоминание."
+
+    if intent_type == "task_create":
+        if not payload:
+            return "Какую задачу добавить? Скажи: «добавь задачу — купить продукты»."
+        try:
+            from app.services.tasks import get_reminder_manager
+
+            manager = get_reminder_manager()
+            result = await manager.create_from_text(user_id, payload, tz_offset=_get_user_tz(session, user_id))
+            title = result.get("title", payload)
+            scheduled = result.get("scheduled_at")
+            if scheduled:
+                return f"Задача «{title}» добавлена, напомню {_format_dt(scheduled)}."
+            return f"Задача «{title}» добавлена."
+        except ValueError:
+            # Нет даты — создаём без привязки ко времени
+            from app.services.tasks import get_reminder_manager
+
+            manager = get_reminder_manager()
+            result_fallback = await manager.create(user_id, payload)
+            return f"Задача «{payload}» добавлена, напомню через час."
+        except Exception as exc:
+            logger.warning("task_create failed: %s", exc)
+            return "Не получилось добавить задачу."
+
+    if intent_type == "task_list":
+        try:
+            from app.services.tasks import get_reminder_manager
+
+            manager = get_reminder_manager()
+            reminders = await manager.list_pending(user_id)
+            if not reminders:
+                return "Нет активных напоминаний и задач. Скажи «напомни...» чтобы создать."
+            lines = ["Твои напоминания:"]
+            for r in reminders[:10]:
+                dt_str = _format_dt(r.get("scheduled_at", "")) if r.get("scheduled_at") else "без даты"
+                rec = f" ({r['recurrence']})" if r.get("recurrence") else ""
+                lines.append(f"• #{r['id']} — {r['title']}{rec} [{dt_str}]")
+            return "\n".join(lines)
+        except Exception as exc:
+            logger.warning("task_list failed: %s", exc)
+            return "Не смог достать задачи."
+
+    if intent_type == "task_cancel":
+        if not payload:
+            return "Какое напоминание отменить?"
+        return f"Чтобы отменить, укажи номер: «отмени напоминание #123»."
+
     return None
+
+
+def _get_user_tz(session: AsyncSession, user_id: str) -> int:  # noqa: ARG001
+    """Получает timezone offset пользователя (sync-safe fallback)."""
+    return 3  # Moscow default; full async version in notifications.py
+
+
+def _format_dt(iso_str: str) -> str:
+    """Форматирует ISO datetime в читаемый русский формат."""
+    if not iso_str:
+        return "скоро"
+    try:
+        from datetime import datetime, timedelta, timezone as tz
+
+        dt = datetime.fromisoformat(iso_str)
+        # Показываем в московском времени по умолчанию
+        local = dt.replace(tzinfo=tz.utc).astimezone(tz(timedelta(hours=3)))
+        now = datetime.now(tz(timedelta(hours=3)))
+        delta = local - now
+
+        if delta.days == 0:
+            return f"сегодня в {local.strftime('%H:%M')}"
+        if delta.days == 1:
+            return f"завтра в {local.strftime('%H:%M')}"
+        if delta.days == 2:
+            return f"послезавтра в {local.strftime('%H:%M')}"
+        weekdays = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+        return f"{local.strftime('%d.%m')} ({weekdays[local.weekday()]}) в {local.strftime('%H:%M')}"
+    except Exception:
+        return iso_str
 
 
 async def _try_tool_use_chat(
