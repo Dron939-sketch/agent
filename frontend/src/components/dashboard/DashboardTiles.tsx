@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   DndContext,
   closestCenter,
@@ -22,47 +22,52 @@ type Tile = {
   id: string;
   title: string;
   hint: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   accent: string;
 };
 
-const INITIAL_TILES: Tile[] = [
-  {
-    id: "weather",
-    title: "Погода",
-    hint: "Подключи OpenWeather в .env",
-    icon: <Cloud className="h-5 w-5" />,
-    accent: "from-neon-cyan/40 to-neon-cyan/5"
-  },
-  {
-    id: "tasks",
-    title: "Задачи",
-    hint: "Планировщик и напоминания",
-    icon: <Calendar className="h-5 w-5" />,
-    accent: "from-neon-violet/40 to-neon-violet/5"
-  },
-  {
-    id: "github",
-    title: "GitHub",
-    hint: "PR, issues, CI статус",
-    icon: <GitBranch className="h-5 w-5" />,
-    accent: "from-neon-pink/40 to-neon-pink/5"
-  },
-  {
-    id: "news",
-    title: "Новости",
-    hint: "Дайджест по твоим темам",
-    icon: <Newspaper className="h-5 w-5" />,
-    accent: "from-neon-lime/40 to-neon-lime/5"
-  },
-  {
-    id: "memory",
-    title: "Память",
-    hint: "Сохранённые факты и идеи",
-    icon: <Brain className="h-5 w-5" />,
-    accent: "from-neon-violet/40 to-neon-pink/10"
-  }
-];
+// Фабрика плиток. JSX создаётся внутри функции — вызов идёт из
+// useState lazy initializer в компоненте, поэтому никакого
+// module-init side-effect нет (иначе — риск TDZ в shared chunks).
+function buildInitialTiles(): Tile[] {
+  return [
+    {
+      id: "weather",
+      title: "Погода",
+      hint: "Подключи OpenWeather в .env",
+      icon: <Cloud className="h-5 w-5" />,
+      accent: "from-neon-cyan/40 to-neon-cyan/5"
+    },
+    {
+      id: "tasks",
+      title: "Задачи",
+      hint: "Планировщик и напоминания",
+      icon: <Calendar className="h-5 w-5" />,
+      accent: "from-neon-violet/40 to-neon-violet/5"
+    },
+    {
+      id: "github",
+      title: "GitHub",
+      hint: "PR, issues, CI статус",
+      icon: <GitBranch className="h-5 w-5" />,
+      accent: "from-neon-pink/40 to-neon-pink/5"
+    },
+    {
+      id: "news",
+      title: "Новости",
+      hint: "Дайджест по твоим темам",
+      icon: <Newspaper className="h-5 w-5" />,
+      accent: "from-neon-lime/40 to-neon-lime/5"
+    },
+    {
+      id: "memory",
+      title: "Память",
+      hint: "Сохранённые факты и идеи",
+      icon: <Brain className="h-5 w-5" />,
+      accent: "from-neon-violet/40 to-neon-pink/10"
+    }
+  ];
+}
 
 function TileCard({ tile }: { tile: Tile }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -103,7 +108,9 @@ function TileCard({ tile }: { tile: Tile }) {
 }
 
 export function DashboardTiles({ id }: { id?: string }) {
-  const [tiles, setTiles] = useState<Tile[]>(INITIAL_TILES);
+  // Lazy initializer — JSX иконок создаётся при первом рендере,
+  // а не при импорте модуля.
+  const [tiles, setTiles] = useState<Tile[]>(() => buildInitialTiles());
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   function onDragEnd(event: DragEndEvent) {
