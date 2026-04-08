@@ -4,13 +4,23 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ImagePlus, LogIn, Send, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import {
+  ImagePlus,
+  LogIn,
+  Send,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  Volume2,
+  VolumeX
+} from "lucide-react";
 import {
   analyzeImage,
   generateImage,
   sendChat,
   sendFeedback,
   streamChat,
+  streamSpeech,
   type ChatMessage as ChatMsgT
 } from "@/lib/api";
 import { useSession } from "@/store/session";
@@ -50,6 +60,8 @@ function openAuth() {
 
 export function ChatPanel({ id, onStateChange }: Props) {
   const token = useSession((s) => s.token);
+  const voiceReply = useSession((s) => s.voiceReply);
+  const setVoiceReply = useSession((s) => s.setVoiceReply);
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
@@ -61,6 +73,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
   const [busy, setBusy] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const playerRef = useRef<HTMLAudioElement | null>(null);
 
   function scrollToEnd() {
     queueMicrotask(() =>
@@ -71,12 +84,53 @@ export function ChatPanel({ id, onStateChange }: Props) {
     );
   }
 
+  function stopAudio() {
+    if (playerRef.current) {
+      try {
+        playerRef.current.pause();
+      } catch {}
+      playerRef.current = null;
+    }
+  }
+
+  async function speakReply(text: string, tone?: string | null) {
+    if (!voiceReply || !text.trim()) return;
+    stopAudio();
+    try {
+      const url = await streamSpeech(text.slice(0, 1500), { tone: tone ?? "warm" });
+      const audio = new Audio(url);
+      playerRef.current = audio;
+      onStateChange?.("speaking");
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        if (playerRef.current === audio) {
+          playerRef.current = null;
+          onStateChange?.("idle");
+        }
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (playerRef.current === audio) {
+          playerRef.current = null;
+          onStateChange?.("idle");
+        }
+      };
+      await audio.play();
+    } catch {
+      // если TTS не настроен на бекенде — тихо игнорим, текст уже показан
+      onStateChange?.("idle");
+    }
+  }
+
   async function onSend() {
     if (!input.trim() || busy) return;
     if (!token) {
       openAuth();
       return;
     }
+
+    // Если Фреди говорит — прервать его при новой реплике (barge-in lite)
+    stopAudio();
 
     const user = input.trim();
     setInput("");
@@ -118,11 +172,14 @@ export function ChatPanel({ id, onStateChange }: Props) {
       return;
     }
 
-    // 2. Обычный текстовый чат через streaming
+    // 2. Обычный чат: streaming + одновременно полный POST для метаданных
     try {
       let acc = "";
       setMessages((m) => [...m, { role: "assistant", content: "" }]);
-      onStateChange?.("speaking");
+
+      // Параллельно стартуем streamChat (для бубла) и sendChat (для emotion+id)
+      const metaPromise = sendChat(user, { profile: "smart" }).catch(() => null);
+
       await streamChat(user, (chunk) => {
         acc += chunk;
         setMessages((m) => {
@@ -131,22 +188,30 @@ export function ChatPanel({ id, onStateChange }: Props) {
           return next;
         });
       });
-      // После окончания получаем эмоцию через отдельный POST (быстрее, чем парсить SSE)
-      try {
-        const meta = await sendChat(user, { profile: "smart" });
+
+      const meta = await metaPromise;
+      if (meta) {
         setMessages((m) => {
           const next = [...m];
-          // обновляем последний ответ ассистента метаданными
           for (let i = next.length - 1; i >= 0; i--) {
             if (next[i].role === "assistant" && !next[i].id) {
-              next[i] = { ...next[i], emotion: meta.emotion, tone: meta.tone, id: meta.message_id };
+              next[i] = {
+                ...next[i],
+                emotion: meta.emotion,
+                tone: meta.tone,
+                id: meta.message_id
+              };
               break;
             }
           }
           return next;
         });
-      } catch {
-        /* not critical */
+      }
+
+      // Авто-озвучка ответа (если включено)
+      const finalText = (meta?.reply ?? acc) || acc;
+      if (voiceReply && finalText.trim()) {
+        await speakReply(finalText, meta?.tone);
       }
     } catch (err) {
       const msg = (err as Error).message;
@@ -155,15 +220,13 @@ export function ChatPanel({ id, onStateChange }: Props) {
         ...m,
         {
           role: "assistant",
-          content: is401
-            ? "🔒 Нужна авторизация. Открываю окно входа…"
-            : `⚠️ Ошибка: ${msg}`
+          content: is401 ? "🔒 Нужна авторизация. Открываю окно входа…" : `⚠️ Ошибка: ${msg}`
         }
       ]);
       if (is401) openAuth();
     } finally {
       setBusy(false);
-      onStateChange?.("idle");
+      if (!voiceReply) onStateChange?.("idle");
       scrollToEnd();
     }
   }
@@ -173,18 +236,23 @@ export function ChatPanel({ id, onStateChange }: Props) {
       openAuth();
       return;
     }
+    stopAudio();
     setMessages((m) => [
       ...m,
-      { role: "user", content: `[Изображение: ${file.name}]`, imageUrl: URL.createObjectURL(file) }
+      {
+        role: "user",
+        content: `[Изображение: ${file.name}]`,
+        imageUrl: URL.createObjectURL(file)
+      }
     ]);
     setBusy(true);
     onStateChange?.("thinking");
     try {
       const res = await analyzeImage(file, "Опиши изображение по-русски, кратко и точно.");
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: res.text, tone: "warm" }
-      ]);
+      setMessages((m) => [...m, { role: "assistant", content: res.text, tone: "warm" }]);
+      if (voiceReply && res.text) {
+        await speakReply(res.text, "warm");
+      }
     } catch (err) {
       setMessages((m) => [
         ...m,
@@ -195,7 +263,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
       ]);
     } finally {
       setBusy(false);
-      onStateChange?.("idle");
+      if (!voiceReply) onStateChange?.("idle");
       scrollToEnd();
     }
   }
@@ -215,6 +283,13 @@ export function ChatPanel({ id, onStateChange }: Props) {
     }
   }
 
+  function toggleVoiceReply() {
+    if (voiceReply) {
+      stopAudio();
+    }
+    setVoiceReply(!voiceReply);
+  }
+
   // Welcome после логина
   useEffect(() => {
     if (token) {
@@ -231,14 +306,26 @@ export function ChatPanel({ id, onStateChange }: Props) {
     }
   }, [token]);
 
+  // Cleanup при размонтировании
+  useEffect(() => () => stopAudio(), []);
+
   return (
     <section id={id} className="glass flex h-[560px] flex-col p-4">
       <div className="mb-3 flex items-center gap-2 text-sm text-slate-300">
         <Sparkles className="h-4 w-4 text-neon-violet" />
         <span>Диалог с Фреди</span>
-        <span className="ml-auto text-xs text-slate-500">
-          {token ? "stream · vision · memory" : "guest"}
-        </span>
+        <button
+          onClick={toggleVoiceReply}
+          className={`ml-auto rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition ${
+            voiceReply
+              ? "border-neon-cyan/40 bg-neon-cyan/10 text-neon-cyan"
+              : "border-white/10 bg-white/5 text-slate-500 hover:text-white"
+          }`}
+          title={voiceReply ? "Озвучка включена" : "Озвучка выключена"}
+        >
+          {voiceReply ? <Volume2 className="inline h-3 w-3" /> : <VolumeX className="inline h-3 w-3" />}
+          <span className="ml-1">{voiceReply ? "voice on" : "voice off"}</span>
+        </button>
       </div>
 
       <div ref={listRef} className="scrollbar-thin flex-1 space-y-3 overflow-y-auto pr-2">
@@ -289,14 +376,18 @@ export function ChatPanel({ id, onStateChange }: Props) {
                     {m.id && (
                       <div className="ml-auto flex gap-1">
                         <button
-                          className={`rounded p-1 transition ${m.feedback === 1 ? "text-neon-lime" : "text-slate-500 hover:text-white"}`}
+                          className={`rounded p-1 transition ${
+                            m.feedback === 1 ? "text-neon-lime" : "text-slate-500 hover:text-white"
+                          }`}
                           onClick={() => onFeedback(i, 1)}
                           aria-label="нравится"
                         >
                           <ThumbsUp className="h-3 w-3" />
                         </button>
                         <button
-                          className={`rounded p-1 transition ${m.feedback === -1 ? "text-neon-pink" : "text-slate-500 hover:text-white"}`}
+                          className={`rounded p-1 transition ${
+                            m.feedback === -1 ? "text-neon-pink" : "text-slate-500 hover:text-white"
+                          }`}
                           onClick={() => onFeedback(i, -1)}
                           aria-label="не нравится"
                         >
@@ -354,11 +445,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
             <Send className="h-4 w-4" />
           </button>
         ) : (
-          <button
-            onClick={openAuth}
-            className="btn-primary h-[46px] px-4"
-            title="Войти / Регистрация"
-          >
+          <button onClick={openAuth} className="btn-primary h-[46px] px-4" title="Войти / Регистрация">
             <LogIn className="h-4 w-4" />
           </button>
         )}
