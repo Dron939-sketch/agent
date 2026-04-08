@@ -51,9 +51,11 @@ async def lifespan(_app: FastAPI):  # noqa: ANN201
     # Sprint 6: Start proactive trigger engine
     from app.services.triggers import get_trigger_engine
     from app.services.triggers.builtin import register_builtin_triggers
+    from app.services.triggers.monitors import register_monitor_triggers
 
     trigger_engine = get_trigger_engine()
     register_builtin_triggers(trigger_engine)
+    register_monitor_triggers(trigger_engine)
     await trigger_engine.start()
 
     autonomy = get_autonomy_loop()

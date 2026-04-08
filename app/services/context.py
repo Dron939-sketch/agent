@@ -31,6 +31,7 @@ class FullContext:
     profile_prompt: str = ""
     recalled: list[str] = field(default_factory=list)
     knowledge_prompt: str = ""  # Sprint 7: граф знаний
+    situation_prompt: str = ""  # Sprint 10: ситуационный контекст
     emotion: EmotionResult | None = None
     emotion_trend: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
@@ -99,6 +100,15 @@ class ContextAggregator:
             logger.warning("knowledge graph failed: %s", exc)
             ctx.knowledge_prompt = ""
 
+        # 7. Sprint 10: Ситуационный контекст
+        try:
+            from app.services.situation import build_situation_context
+
+            ctx.situation_prompt = await build_situation_context(user_id)
+        except Exception as exc:
+            logger.warning("situation context failed: %s", exc)
+            ctx.situation_prompt = ""
+
         return ctx
 
     @staticmethod
@@ -124,11 +134,24 @@ class ContextAggregator:
         elif trend.get("trend") == "stable" and trend.get("emotion"):
             parts.append(f"(эмоциональное состояние стабильно: {trend['emotion']})")
 
+        if ctx.situation_prompt:
+            parts.append(ctx.situation_prompt)
+
         if ctx.knowledge_prompt:
             parts.append(ctx.knowledge_prompt)
 
         if ctx.recalled:
             memo = "\n".join(f"- {t}" for t in ctx.recalled)
             parts.append(f"РЕЛЕВАНТНАЯ ПАМЯТЬ:\n{memo}")
+
+        # Sprint 11: Dialogue instructions
+        try:
+            from app.services.dialogue import build_dialogue_instructions
+
+            dialogue_instr = build_dialogue_instructions(ctx.history)
+            if dialogue_instr:
+                parts.append(dialogue_instr)
+        except Exception:
+            pass
 
         return "\n\n".join(parts)
