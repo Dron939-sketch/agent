@@ -9,7 +9,16 @@ import {
   KBarResults,
   useMatches
 } from "kbar";
-import { MessageSquare, Workflow, LogIn, Sparkles, Languages } from "lucide-react";
+import {
+  Languages,
+  LogIn,
+  LogOut,
+  MessageSquare,
+  Sparkles,
+  Volume2,
+  VolumeX,
+  Workflow
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { useSession } from "@/store/session";
 
@@ -51,6 +60,10 @@ function scrollTo(id: string) {
 export function CommandPalette({ children }: { children: ReactNode }) {
   const setProfile = useSession((s) => s.setProfile);
   const setLocale = useSession((s) => s.setLocale);
+  const voiceReply = useSession((s) => s.voiceReply);
+  const setVoiceReply = useSession((s) => s.setVoiceReply);
+  const token = useSession((s) => s.token);
+  const logout = useSession((s) => s.logout);
 
   const actions = [
     {
@@ -72,14 +85,42 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       perform: () => scrollTo("agents")
     },
     {
-      id: "login",
-      name: "Войти / Sign in",
-      keywords: "login auth signup",
-      section: "Аккаунт",
-      icon: <LogIn className="h-4 w-4 text-neon-pink" />,
-      perform: () =>
-        window.dispatchEvent(new CustomEvent("freddy:open-auth"))
+      id: "voice-toggle",
+      name: voiceReply ? "🔊 Выключить озвучку" : "🔇 Включить озвучку",
+      keywords: "voice tts mute speak",
+      section: "Голос",
+      icon: voiceReply ? (
+        <VolumeX className="h-4 w-4 text-neon-pink" />
+      ) : (
+        <Volume2 className="h-4 w-4 text-neon-cyan" />
+      ),
+      perform: () => setVoiceReply(!voiceReply)
     },
+    ...(token
+      ? [
+          {
+            id: "logout",
+            name: "Выйти",
+            keywords: "logout signout exit",
+            section: "Аккаунт",
+            icon: <LogOut className="h-4 w-4 text-neon-pink" />,
+            perform: () => {
+              localStorage.removeItem("freddy_token");
+              logout();
+            }
+          }
+        ]
+      : [
+          {
+            id: "login",
+            name: "Войти / Sign in",
+            keywords: "login auth signup",
+            section: "Аккаунт",
+            icon: <LogIn className="h-4 w-4 text-neon-pink" />,
+            perform: () =>
+              window.dispatchEvent(new CustomEvent("freddy:open-auth"))
+          }
+        ]),
     {
       id: "profile-smart",
       name: "Режим: Smart (Claude/GPT-4)",
