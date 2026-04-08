@@ -7,6 +7,7 @@ import { LogIn, LogOut } from "lucide-react";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { AgentTimeline } from "@/components/timeline/AgentTimeline";
 import { DashboardTiles } from "@/components/dashboard/DashboardTiles";
+import { MoodGraph } from "@/components/dashboard/MoodGraph";
 import { VoiceRecorder } from "@/components/voice/VoiceRecorder";
 import { useSession } from "@/store/session";
 
@@ -50,6 +51,7 @@ export default function HomePage() {
         <nav className="hidden gap-6 text-sm text-slate-400 md:flex md:items-center">
           <a className="hover:text-white" href="#chat">Чат</a>
           <a className="hover:text-white" href="#agents">Агенты</a>
+          <a className="hover:text-white" href="#mood">Настроение</a>
           <a className="hover:text-white" href="#dashboard">Дашборд</a>
           <kbd className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-slate-400">
             ⌘K
@@ -89,6 +91,7 @@ export default function HomePage() {
         <AgentTimeline id="agents" />
       </section>
 
+      <MoodGraph id="mood" />
       <DashboardTiles id="dashboard" />
 
       <VoiceRecorder />
