@@ -14,11 +14,13 @@ from app.auth import AuthenticatedUser
 from app.core.config import Config
 from app.core.logging import get_logger
 from app.db import (
+    ChatSessionRepository,
     ConversationRepository,
     EmotionRepository,
     GoalRepository,
     HabitRepository,
 )
+from app.services.episodic import summarize_session
 from app.services import ChatMessage, default_router
 from app.services.context import ContextAggregator
 from app.services.emotion import EmotionService
@@ -361,6 +363,26 @@ def _format_dt(iso_str: str) -> str:
         return iso_str
 
 
+async def _attach_chat_session(
+    session: AsyncSession, user_id: str, background: BackgroundTasks
+) -> int:
+    """ROUND 3: Получает активную сессию, триггерит суммаризацию stale-сессии.
+
+    Возвращает chat_session_id для использования в ``convos.add``.
+    """
+    repo = ChatSessionRepository(session)
+    try:
+        active_id, stale_id = await repo.get_or_create_active(user_id)
+    except Exception as exc:
+        logger.warning("chat session attach failed: %s", exc)
+        return 0
+
+    if stale_id is not None:
+        # старую «подвешенную» сессию суммаризуем в фоне
+        background.add_task(summarize_session, stale_id)
+    return active_id
+
+
 async def _try_tool_use_chat(
     system_text: str,
     history_rows: list[dict],
@@ -402,13 +424,26 @@ async def send(
     session: AsyncSession = Depends(get_session),
 ) -> ChatResponseOut:
     convos = ConversationRepository(session)
-    await convos.add(user.user_id, "user", body.message)
+    chat_session_id = await _attach_chat_session(session, user.user_id, background)
+    await convos.add(
+        user.user_id, "user", body.message, chat_session_id=chat_session_id or None
+    )
 
     intent = detect_intent(body.message)
     if intent.type != "none":
         intent_reply = await _handle_intent(session, user.user_id, intent.type, intent.payload)
         if intent_reply:
-            msg_id = await convos.add(user.user_id, "assistant", intent_reply)
+            msg_id = await convos.add(
+                user.user_id,
+                "assistant",
+                intent_reply,
+                chat_session_id=chat_session_id or None,
+            )
+            if chat_session_id:
+                try:
+                    await ChatSessionRepository(session).touch(chat_session_id)
+                except Exception as exc:
+                    logger.warning("chat session touch failed: %s", exc)
             return ChatResponseOut(
                 reply=intent_reply,
                 model="intent-handler",
@@ -453,7 +488,17 @@ async def send(
         response_text = router_response.text
         response_model = router_response.model
 
-    msg_id = await convos.add(user.user_id, "assistant", response_text)
+    msg_id = await convos.add(
+        user.user_id,
+        "assistant",
+        response_text,
+        chat_session_id=chat_session_id or None,
+    )
+    if chat_session_id:
+        try:
+            await ChatSessionRepository(session).touch(chat_session_id)
+        except Exception as exc:
+            logger.warning("chat session touch failed: %s", exc)
 
     if body.use_memory:
         background.add_task(_store_chat_memory, user.user_id, body.message, response_text)
@@ -482,7 +527,10 @@ async def stream(
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
     convos = ConversationRepository(session)
-    await convos.add(user.user_id, "user", body.message)
+    chat_session_id = await _attach_chat_session(session, user.user_id, background)
+    await convos.add(
+        user.user_id, "user", body.message, chat_session_id=chat_session_id or None
+    )
 
     intent = detect_intent(body.message)
     intent_reply: str | None = None
@@ -517,6 +565,7 @@ async def stream(
     profile = body.profile
     use_memory = body.use_memory
     user_id = user.user_id
+    cs_id = chat_session_id or None
 
     async def event_source() -> AsyncIterator[bytes]:
         if intent_reply is not None:
@@ -529,7 +578,11 @@ async def stream(
 
             try:
                 async with session_scope() as s2:
-                    await ConversationRepository(s2).add(user_id, "assistant", intent_reply)
+                    await ConversationRepository(s2).add(
+                        user_id, "assistant", intent_reply, chat_session_id=cs_id
+                    )
+                    if cs_id:
+                        await ChatSessionRepository(s2).touch(cs_id)
             except Exception as exc:
                 logger.warning("intent save failed: %s", exc)
             return
@@ -558,7 +611,11 @@ async def stream(
 
                 try:
                     async with session_scope() as s2:
-                        await ConversationRepository(s2).add(user_id, "assistant", full)
+                        await ConversationRepository(s2).add(
+                            user_id, "assistant", full, chat_session_id=cs_id
+                        )
+                        if cs_id:
+                            await ChatSessionRepository(s2).touch(cs_id)
                 except Exception as exc:
                     logger.warning("stream save failed: %s", exc)
 
