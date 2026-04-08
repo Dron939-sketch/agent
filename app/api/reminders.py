@@ -5,7 +5,7 @@ Sprint 8: CRUD + snooze для напоминаний.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
 from app.auth import AuthenticatedUser
@@ -136,13 +136,18 @@ async def snooze_reminder(
     return result
 
 
-@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
 async def cancel_reminder(
     task_id: int,
     user: AuthenticatedUser = Depends(get_current_user),
-) -> None:
+) -> Response:
     """Отменяет напоминание."""
     manager = get_reminder_manager()
     ok = await manager.cancel(task_id, user.user_id)
     if not ok:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Reminder not found or already done")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

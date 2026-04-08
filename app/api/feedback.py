@@ -1,13 +1,18 @@
-"""Feedback endpoints: лайки/дизлайки на ответы Фреди."""
+"""Feedback endpoints: лайки/дизлайки на ответы Фреди.
+
+ROUND 2: каждая оценка превращается в урок (lesson) для будущих ответов
+через ``feedback_learner.record_lesson`` — BackgroundTask после сохранения.
+"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import AuthenticatedUser
 from app.db import FeedbackRepository
+from app.services.feedback_learner import record_lesson
 
 from .deps import get_current_user, get_session
 
@@ -34,6 +39,7 @@ class StatsOut(BaseModel):
 @router.post("/", response_model=FeedbackOut, status_code=status.HTTP_201_CREATED)
 async def submit(
     body: FeedbackIn,
+    background: BackgroundTasks,
     user: AuthenticatedUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> FeedbackOut:
@@ -43,6 +49,15 @@ async def submit(
         message_id=body.message_id,
         note=body.note,
     )
+    # ROUND 2: превращаем feedback в урок для будущих ответов
+    if body.score != 0:
+        background.add_task(
+            record_lesson,
+            user_id=user.user_id,
+            message_id=body.message_id,
+            score=body.score,
+            note=body.note,
+        )
     return FeedbackOut(id=fb_id)
 
 
