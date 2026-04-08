@@ -53,11 +53,21 @@ async def trigger_ws(
     Фронтенд подключается с ?token=JWT и получает JSON-события
     когда срабатывают триггеры для данного пользователя.
     """
-    # Верифицируем токен
+    # Верифицируем токен. AuthService требует AsyncSession — открываем
+    # её через session_scope только на время проверки (короткая операция),
+    # дальше WebSocket живёт уже без БД-сессии.
     from app.auth import AuthService
+    from app.db import session_scope
 
-    auth = AuthService()
-    user = await auth.verify(token)
+    try:
+        async with session_scope() as session:
+            auth = AuthService(session)
+            user = await auth.verify(token)
+    except Exception as exc:
+        logger.warning("trigger WS auth failed: %s", exc)
+        await ws.close(code=4001, reason="unauthorized")
+        return
+
     if not user:
         await ws.close(code=4001, reason="unauthorized")
         return
