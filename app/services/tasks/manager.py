@@ -182,6 +182,21 @@ class ReminderManager:
         # Отправляем push
         sent = await self._send_push(user_id, title)
 
+        # Если пользователь пришёл через Telegram (user_id вида "tg_<chat_id>")
+        # — дублируем в Telegram, чтобы напоминания доходили во втором канале.
+        tg_sent = False
+        if user_id.startswith("tg_"):
+            try:
+                chat_id = user_id[3:]  # отрезаем префикс "tg_"
+                from plugins.telegram_bot import is_configured, notify_user
+
+                if is_configured() and chat_id:
+                    tg_sent = await notify_user(
+                        chat_id, f"⏰ Напоминание: {title}"
+                    )
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Telegram reminder notify failed: %s", exc)
+
         # Создаём следующее напоминание при recurrence
         next_id: int | None = None
         if recurrence:
@@ -198,6 +213,7 @@ class ReminderManager:
 
         return {
             "push_sent": sent,
+            "telegram_sent": tg_sent,
             "title": title,
             "next_task_id": next_id,
         }

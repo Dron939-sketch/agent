@@ -20,9 +20,10 @@ logger = get_logger(__name__)
 API_BASE = "https://api.elevenlabs.io/v1"
 DEFAULT_VOICE = "EXAVITQu4vr4xnSDxMaL"  # Bella — нейтральный женский, multilingual
 
-# Глобальный множитель скорости речи (+10%). ElevenLabs принимает speed
-# в [0.7; 1.2] (поле в voice_settings model v3+).
-SPEED_BOOST = 1.10
+# Глобальный множитель скорости речи. 1.21 = +21% относительно дефолта.
+# Итерировали: 1.10 → ещё +10% → 1.21. ElevenLabs принимает speed в
+# [0.7; 1.2], поэтому финально clamp-ится к 1.2 (макс ~+20%).
+SPEED_BOOST = 1.21
 
 
 class ElevenLabsTTS:
