@@ -2,17 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, Volume2, X } from "lucide-react";
+import { Mic, MicOff, Volume2, X, Ear } from "lucide-react";
 import { streamSpeech, voiceFullLoop, type FullLoopResponse } from "@/lib/api";
 import { useSession } from "@/store/session";
 import { SilenceDetector } from "@/lib/vad";
+import { isWakeWordSupported } from "@/lib/wakeword";
 import { EmotionBadge } from "./EmotionBadge";
+import { VoiceWakeMode } from "./VoiceWakeMode";
 
 type Phase = "idle" | "recording" | "processing" | "speaking" | "error";
 
 export function VoiceRecorder() {
   const token = useSession((s) => s.token);
   const voice = useSession((s) => s.voice);
+  const alwaysListening = useSession((s) => s.alwaysListening);
+  const setAlwaysListening = useSession((s) => s.setAlwaysListening);
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [level, setLevel] = useState<number[]>(new Array(48).fill(0));
@@ -183,8 +187,11 @@ export function VoiceRecorder() {
   const isRecording = phase === "recording";
   const isBusy = phase === "processing" || phase === "speaking";
 
+  const wakeSupported = isWakeWordSupported();
+
   return (
     <>
+      {/* FAB: микрофон (push-to-talk) */}
       <button
         className="fixed bottom-6 right-6 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-neon-cyan via-neon-violet to-neon-pink text-white shadow-neon transition hover:scale-105 active:scale-95"
         onClick={() => setOpen(true)}
@@ -193,8 +200,30 @@ export function VoiceRecorder() {
         <Mic className="h-6 w-6" />
       </button>
 
+      {/* FAB: wake word mode (always listening) */}
+      {wakeSupported && (
+        <button
+          className={`fixed bottom-6 right-[5.5rem] z-20 flex h-10 w-10 items-center justify-center rounded-full transition hover:scale-105 active:scale-95 ${
+            alwaysListening
+              ? "bg-green-500 text-white shadow-[0_0_20px_rgba(74,222,128,0.4)]"
+              : "bg-white/10 text-slate-400 hover:bg-white/20 hover:text-white border border-white/10"
+          }`}
+          onClick={() => setAlwaysListening(!alwaysListening)}
+          aria-label={alwaysListening ? "Выключить режим Фреди" : "Включить режим Фреди"}
+          title={alwaysListening ? "Режим \"Фреди\" активен" : "Включить режим \"Фреди\""}
+        >
+          <Ear className="h-5 w-5" />
+        </button>
+      )}
+
+      {/* Always-listening wake word mode overlay */}
       <AnimatePresence>
-        {open && (
+        {alwaysListening && <VoiceWakeMode />}
+      </AnimatePresence>
+
+      {/* Standard push-to-talk modal */}
+      <AnimatePresence>
+        {open && !alwaysListening && (
           <motion.div
             className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 backdrop-blur-sm"
             initial={{ opacity: 0 }}
@@ -215,6 +244,21 @@ export function VoiceRecorder() {
               >
                 <X className="h-5 w-5" />
               </button>
+
+              {/* Wake mode toggle inside modal */}
+              {wakeSupported && (
+                <button
+                  className="absolute left-3 top-3 flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-slate-400 transition hover:bg-green-500/20 hover:text-green-400"
+                  onClick={() => {
+                    close();
+                    setAlwaysListening(true);
+                  }}
+                  title='Включить режим "Фреди" (wake word)'
+                >
+                  <Ear className="h-3 w-3" />
+                  <span>Фреди</span>
+                </button>
+              )}
 
               <div className="mb-3 flex items-center justify-center gap-2 text-sm text-slate-300">
                 {phase === "speaking" && (

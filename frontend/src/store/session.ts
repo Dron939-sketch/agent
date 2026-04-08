@@ -15,12 +15,15 @@ type SessionState = {
   voiceReply: boolean;
   /** Голос TTS — id из каталога Yandex/ElevenLabs (madirus, filipp, jane, ...). */
   voice: string;
+  /** Wake word "Фреди" — постоянное прослушивание в голосовом режиме. */
+  alwaysListening: boolean;
   setAuth: (token: string, username: string) => void;
   logout: () => void;
   setProfile: (p: Profile) => void;
   setLocale: (l: Locale) => void;
   setVoiceReply: (v: boolean) => void;
   setVoice: (v: string) => void;
+  setAlwaysListening: (v: boolean) => void;
   markOnboarded: () => void;
 };
 
@@ -34,12 +37,14 @@ export const useSession = create<SessionState>()(
       onboarded: false,
       voiceReply: true,
       voice: "madirus",
+      alwaysListening: false,
       setAuth: (token, username) => set({ token, username }),
       logout: () => set({ token: null, username: null }),
       setProfile: (profile) => set({ profile }),
       setLocale: (locale) => set({ locale }),
       setVoiceReply: (voiceReply) => set({ voiceReply }),
       setVoice: (voice) => set({ voice }),
+      setAlwaysListening: (alwaysListening) => set({ alwaysListening }),
       markOnboarded: () => set({ onboarded: true })
     }),
     {
@@ -51,7 +56,8 @@ export const useSession = create<SessionState>()(
         locale: s.locale,
         onboarded: s.onboarded,
         voiceReply: s.voiceReply,
-        voice: s.voice
+        voice: s.voice,
+        alwaysListening: s.alwaysListening
       })
     }
   )
