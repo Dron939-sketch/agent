@@ -1,8 +1,4 @@
-"""Chat-роуты с памятью, эмоциями, intents, KB, tool-use и SSE-стримом.
-
-Sprint 4: для smart-профиля (Claude) теперь используется native tool-use —
-Фреди реально вызывает web_search/calculator/now/fetch_url когда уместно.
-"""
+"""Chat-роуты с памятью, эмоциями, intents, KB, tool-use, sentence-streaming."""
 
 from __future__ import annotations
 
@@ -23,6 +19,7 @@ from app.services.context import ContextAggregator
 from app.services.emotion import EmotionService
 from app.services.intents import detect_intent
 from app.services.knowledge import freddy_persona
+from app.services.llm.sentences import SentenceBuffer
 from app.services.llm.tooluse import ToolUseChat
 from app.services.memory import MemoryRecord, default_memory
 from app.services.memory.extractor import extract_facts
@@ -171,11 +168,6 @@ async def _try_tool_use_chat(
     history_rows: list[dict],
     user_message: str,
 ) -> tuple[str | None, bool]:
-    """Пробует Anthropic native tool-use. Возвращает (reply, used).
-
-    Если ANTHROPIC_API_KEY не задан или ответ пустой → (None, False).
-    Тогда вызывающий код откатывается к обычному default_router().chat().
-    """
     if not Config.ANTHROPIC_API_KEY:
         return None, False
 
@@ -183,7 +175,6 @@ async def _try_tool_use_chat(
     if not tool_chat.is_available():
         return None, False
 
-    # Anthropic ожидает {role, content} с user/assistant only
     msgs: list[dict] = []
     for m in history_rows:
         if m["role"] in ("user", "assistant"):
@@ -255,7 +246,6 @@ async def send(
     response_text: str | None = None
     response_model = "router"
 
-    # Sprint 4: для smart-профиля сначала пробуем native tool-use (Claude умеет)
     if body.profile == "smart" and body.use_tools:
         response_text, used_tools = await _try_tool_use_chat(
             system_text, history_rows, body.message
@@ -263,7 +253,6 @@ async def send(
         if response_text:
             response_model = "claude-sonnet-4-6+tools"
 
-    # Fallback на обычный LLMRouter
     if not response_text:
         messages = _ctx_messages(_base_system(), full_ctx, history_rows, body.message)
         router_response = await default_router().chat(messages, profile=body.profile)  # type: ignore[arg-type]
@@ -339,6 +328,9 @@ async def stream(
         if intent_reply is not None:
             payload = json.dumps({"t": intent_reply}, ensure_ascii=False)
             yield f"data: {payload}\n\n".encode("utf-8")
+            # Также отдаём sentence-event для TTS
+            sentence_payload = json.dumps({"s": intent_reply}, ensure_ascii=False)
+            yield f"data: {sentence_payload}\n\n".encode("utf-8")
             yield b"event: done\ndata: end\n\n"
             from app.db import session_scope
 
@@ -349,12 +341,27 @@ async def stream(
                 logger.warning("intent save failed: %s", exc)
             return
 
+        # Sprint 5: эмитим И токены (для UI), И готовые предложения (для TTS).
+        # Фронт собирает токены в bubble и параллельно играет TTS по sentence.
         collected: list[str] = []
+        sentence_buf = SentenceBuffer()
+
         try:
             async for chunk in default_router().stream(messages, profile=profile):  # type: ignore[arg-type]
                 collected.append(chunk)
-                payload = json.dumps({"t": chunk}, ensure_ascii=False)
-                yield f"data: {payload}\n\n".encode("utf-8")
+                # token event — для UI
+                token_payload = json.dumps({"t": chunk}, ensure_ascii=False)
+                yield f"data: {token_payload}\n\n".encode("utf-8")
+                # sentence event — для TTS
+                for sentence in sentence_buf.add(chunk):
+                    sent_payload = json.dumps({"s": sentence}, ensure_ascii=False)
+                    yield f"data: {sent_payload}\n\n".encode("utf-8")
+
+            tail = sentence_buf.flush()
+            if tail:
+                sent_payload = json.dumps({"s": tail}, ensure_ascii=False)
+                yield f"data: {sent_payload}\n\n".encode("utf-8")
+
             yield b"event: done\ndata: end\n\n"
         finally:
             full = "".join(collected)
