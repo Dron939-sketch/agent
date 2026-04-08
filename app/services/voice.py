@@ -1,10 +1,14 @@
-"""Voice services: STT (Deepgram + Yandex), TTS (Yandex).
+"""Voice services: STT (Deepgram + Yandex) + TTS (ElevenLabs + Yandex).
 
-`VoiceService.transcribe()` авто-выбирает провайдера: Deepgram, если задан
-`DEEPGRAM_API_KEY`, иначе Yandex SpeechKit. TTS — только Yandex (для русского).
+Sprint 2: VoiceService теперь умеет:
+- STT: Deepgram → Yandex
+- TTS: ElevenLabs (premium, streaming, прозодия) → Yandex (fallback)
+- Voice emotion: Hume (если ключ есть) → text-emotion fallback
 """
 
 from __future__ import annotations
+
+from collections.abc import AsyncIterator
 
 import aiohttp
 
@@ -19,8 +23,6 @@ YANDEX_TTS_URL = "https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize"
 
 
 class DeepgramSTT:
-    """Минимальный async-клиент Deepgram listen API."""
-
     def __init__(self, api_key: str | None = None, model: str = "nova-2") -> None:
         self.api_key = api_key if api_key is not None else Config.DEEPGRAM_API_KEY
         self.model = model
@@ -66,8 +68,6 @@ class DeepgramSTT:
 
 
 class YandexSpeechKit:
-    """Yandex SpeechKit STT + TTS."""
-
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key if api_key is not None else Config.YANDEX_API_KEY
 
@@ -113,7 +113,7 @@ class YandexSpeechKit:
 
 
 class VoiceService:
-    """Унифицированный фасад: транскрипция через Deepgram→Yandex, TTS через Yandex."""
+    """Унифицированный фасад: STT (Deepgram→Yandex), TTS (ElevenLabs→Yandex)."""
 
     def __init__(
         self,
@@ -122,6 +122,23 @@ class VoiceService:
     ) -> None:
         self.deepgram = deepgram or DeepgramSTT()
         self.yandex = yandex or YandexSpeechKit()
+        # ElevenLabs/Hume импортируем лениво (чтобы тесты могли работать без них)
+        self._eleven = None
+        self._hume = None
+
+    def _get_eleven(self):
+        if self._eleven is None:
+            from app.services.voice_pkg.elevenlabs import ElevenLabsTTS
+
+            self._eleven = ElevenLabsTTS()
+        return self._eleven
+
+    def _get_hume(self):
+        if self._hume is None:
+            from app.services.voice_pkg.hume import HumeVoiceEmotion
+
+            self._hume = HumeVoiceEmotion()
+        return self._hume
 
     async def transcribe(
         self,
@@ -143,13 +160,59 @@ class VoiceService:
                 return text, "yandex"
         return None, "none"
 
-    async def synthesize(self, text: str, voice: str = "jane") -> bytes | None:
-        return await self.yandex.synthesize(text, voice=voice)
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        tone: str = "warm",
+        prefer: str = "auto",  # auto | elevenlabs | yandex
+    ) -> tuple[bytes | None, str]:
+        """Возвращает (audio_bytes, провайдер).
 
-    # Backward-compat (старое имя из Фазы 1)
+        `prefer="auto"` пробует ElevenLabs (если ключ есть), иначе Yandex.
+        """
+        if prefer in ("auto", "elevenlabs") and Config.ELEVENLABS_API_KEY:
+            audio = await self._get_eleven().synthesize(text, tone=tone)
+            if audio:
+                return audio, "elevenlabs"
+        if Config.YANDEX_API_KEY:
+            audio = await self.yandex.synthesize(text)
+            if audio:
+                return audio, "yandex"
+        return None, "none"
+
+    async def synthesize_stream(
+        self,
+        text: str,
+        *,
+        tone: str = "warm",
+    ) -> AsyncIterator[bytes]:
+        """Streaming TTS — пока только ElevenLabs (Yandex не отдаёт chunked)."""
+        if Config.ELEVENLABS_API_KEY:
+            async for chunk in self._get_eleven().stream(text, tone=tone):
+                yield chunk
+            return
+        # Fallback: Yandex синхронный — отдаём одним блобом
+        audio, _ = await self.synthesize(text, tone=tone, prefer="yandex")
+        if audio:
+            yield audio
+
+    async def voice_emotion(
+        self,
+        audio_bytes: bytes,
+        *,
+        content_type: str = "audio/webm",
+    ) -> dict | None:
+        """Анализ эмоций по голосу через Hume."""
+        if not Config.HUME_API_KEY:
+            return None
+        return await self._get_hume().analyze(audio_bytes, content_type=content_type)
+
+    # Backward-compat
     async def speech_to_text(self, audio_bytes: bytes, format: str = "ogg") -> str | None:  # noqa: ARG002
         text, _ = await self.transcribe(audio_bytes)
         return text
 
-    async def text_to_speech(self, text: str, voice: str = "jane") -> bytes | None:
-        return await self.synthesize(text, voice=voice)
+    async def text_to_speech(self, text: str, voice: str = "jane") -> bytes | None:  # noqa: ARG002
+        audio, _ = await self.synthesize(text)
+        return audio
