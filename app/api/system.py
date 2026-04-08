@@ -129,7 +129,6 @@ async def favicon() -> Response:
 
 @router.get("/health")
 async def health() -> dict[str, object]:
-    """Liveness — отдаёт 200 если процесс жив."""
     return {
         "status": "ok",
         "uptime_seconds": int(time.time() - _STARTED_AT),
@@ -138,7 +137,6 @@ async def health() -> dict[str, object]:
 
 @router.get("/ready")
 async def ready() -> dict[str, object]:
-    """Readiness — проверяет БД-коннект. 200 если БД отвечает, 503 если нет."""
     try:
         async with session_scope() as session:
             await session.execute(text("SELECT 1"))
@@ -149,17 +147,12 @@ async def ready() -> dict[str, object]:
 
 @router.get("/keepalive", include_in_schema=False)
 async def keepalive() -> dict[str, str]:
-    """Лёгкий ping для удержания сервиса от засыпания на free-tier хостингах."""
     return {"status": "alive"}
 
 
 @router.get("/integrations")
 async def integrations() -> dict[str, object]:
-    """Статус всех опциональных интеграций (без раскрытия секретов).
-
-    Отдаёт `true` если соответствующая env-переменная задана и непустая.
-    Используется для быстрой диагностики "почему не работает голос/push".
-    """
+    """Статус всех опциональных интеграций (без раскрытия секретов)."""
     return {
         "llm": {
             "deepseek": bool(Config.DEEPSEEK_API_KEY),
@@ -167,9 +160,21 @@ async def integrations() -> dict[str, object]:
             "openai": bool(Config.OPENAI_API_KEY),
             "ollama": bool(Config.OLLAMA_BASE_URL),
         },
-        "voice": {
-            "deepgram_stt": bool(Config.DEEPGRAM_API_KEY),
+        "voice_stt": {
+            "deepgram": bool(Config.DEEPGRAM_API_KEY),
             "yandex": bool(Config.YANDEX_API_KEY),
+        },
+        "voice_tts": {
+            "elevenlabs": bool(Config.ELEVENLABS_API_KEY),
+            "yandex": bool(Config.YANDEX_API_KEY),
+        },
+        "voice_emotion": {
+            "hume": bool(Config.HUME_API_KEY),
+        },
+        "vision": {
+            "anthropic": bool(Config.ANTHROPIC_API_KEY),
+            "openai": bool(Config.OPENAI_API_KEY),
+            "replicate_image_gen": bool(Config.REPLICATE_API_TOKEN),
         },
         "weather": bool(Config.OPENWEATHER_API_KEY),
         "search": bool(Config.TAVILY_API_KEY),
