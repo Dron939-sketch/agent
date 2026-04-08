@@ -1,11 +1,16 @@
 """Database layer."""
 
+from .coach_repos import GoalRepository, HabitRepository
 from .models import (
     Backup,
     Base,
+    ChatSession,
     Conversation,
     EmotionEvent,
     Feedback,
+    Goal,
+    Habit,
+    HabitCheck,
     Log,
     Memory,
     PushSubscription,
@@ -41,6 +46,10 @@ __all__ = [
     "PushSubscription",
     "EmotionEvent",
     "Feedback",
+    "Goal",
+    "Habit",
+    "HabitCheck",
+    "ChatSession",
     "UserRepository",
     "SessionRepository",
     "ConversationRepository",
@@ -51,6 +60,8 @@ __all__ = [
     "MemoryRepository",
     "EmotionRepository",
     "FeedbackRepository",
+    "GoalRepository",
+    "HabitRepository",
     "get_engine",
     "get_sessionmaker",
     "session_scope",
