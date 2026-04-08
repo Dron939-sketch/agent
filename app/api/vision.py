@@ -1,9 +1,4 @@
-"""Vision endpoint: распознавание изображений через Claude/OpenAI vision.
-
-Принимает multipart upload + опциональный текстовый вопрос.
-Использует первого доступного провайдера: Anthropic → OpenAI.
-Если ни один не настроен — отдаёт 503.
-"""
+"""Vision endpoints: image **анализ** + image **генерация**."""
 
 from __future__ import annotations
 
@@ -11,11 +6,12 @@ import base64
 
 import aiohttp
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.auth import AuthenticatedUser
 from app.core.config import Config
 from app.core.logging import get_logger
+from app.services.image import ReplicateImageGen
 
 from .deps import get_current_user
 
@@ -27,6 +23,18 @@ router = APIRouter(prefix="/api/vision", tags=["vision"])
 class VisionResponse(BaseModel):
     text: str
     provider: str
+
+
+class GenerateRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=1000)
+    aspect_ratio: str = Field(default="1:1", pattern="^(1:1|16:9|9:16|4:3|3:4)$")
+    num_outputs: int = Field(default=1, ge=1, le=4)
+
+
+class GenerateResponse(BaseModel):
+    urls: list[str]
+    provider: str
+    prompt: str
 
 
 def _detect_media_type(filename: str | None, declared: str | None) -> str:
@@ -154,3 +162,27 @@ async def analyze(
         status.HTTP_503_SERVICE_UNAVAILABLE,
         "no vision provider configured (set ANTHROPIC_API_KEY or OPENAI_API_KEY)",
     )
+
+
+@router.post("/generate", response_model=GenerateResponse)
+async def generate(
+    body: GenerateRequest,
+    _user: AuthenticatedUser = Depends(get_current_user),
+) -> GenerateResponse:
+    """Генерация изображений через Replicate FLUX."""
+    if not Config.REPLICATE_API_TOKEN:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "image generation unavailable (set REPLICATE_API_TOKEN)",
+        )
+    gen = ReplicateImageGen()
+    urls = await gen.generate(
+        body.prompt,
+        aspect_ratio=body.aspect_ratio,
+        num_outputs=body.num_outputs,
+    )
+    if not urls:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, "image generation failed"
+        )
+    return GenerateResponse(urls=urls, provider="replicate-flux", prompt=body.prompt)
