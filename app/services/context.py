@@ -17,6 +17,7 @@ from app.db import (
     ConversationRepository,
     EmotionRepository,
     KnowledgeRepository,
+    MemoryRepository,
     UserRepository,
 )
 from app.services.emotion import EmotionResult, EmotionService
@@ -32,6 +33,7 @@ class FullContext:
     recalled: list[str] = field(default_factory=list)
     knowledge_prompt: str = ""  # Sprint 7: граф знаний
     situation_prompt: str = ""  # Sprint 10: ситуационный контекст
+    lessons: list[str] = field(default_factory=list)  # ROUND 2: feedback lessons
     emotion: EmotionResult | None = None
     emotion_trend: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
@@ -109,6 +111,16 @@ class ContextAggregator:
             logger.warning("situation context failed: %s", exc)
             ctx.situation_prompt = ""
 
+        # 8. ROUND 2: Уроки от обратной связи (анти-паттерны + позитивные примеры)
+        try:
+            lessons_rows = await MemoryRepository(self.session).list_by_kind(
+                user_id, kind="lesson", limit=5
+            )
+            ctx.lessons = [row.text for row in lessons_rows]
+        except Exception as exc:
+            logger.warning("lessons fetch failed: %s", exc)
+            ctx.lessons = []
+
         return ctx
 
     @staticmethod
@@ -143,6 +155,15 @@ class ContextAggregator:
         if ctx.recalled:
             memo = "\n".join(f"- {t}" for t in ctx.recalled)
             parts.append(f"РЕЛЕВАНТНАЯ ПАМЯТЬ:\n{memo}")
+
+        # ROUND 2: Уроки от feedback (анти-паттерны + позитивные примеры)
+        if ctx.lessons:
+            lessons_text = "\n".join(f"- {l}" for l in ctx.lessons)
+            parts.append(
+                "УРОКИ ОТ ПОЛЬЗОВАТЕЛЯ (feedback):\n"
+                f"{lessons_text}\n"
+                "Избегай стиля, помеченного ❌. Опирайся на ✅."
+            )
 
         # Sprint 11: Dialogue instructions
         try:
