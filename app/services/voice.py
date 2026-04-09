@@ -36,6 +36,12 @@ YANDEX_VOICES = {
         "accent": "russian",
         "yandex_voice": "filipp",  # Mapping: jarvis → filipp с настройками
     },
+    "jarvis_fish": {
+        "label": "Джарвис Fish Audio (облачный, быстрый)",
+        "gender": "male",
+        "accent": "british",
+        "provider": "fish",  # Fish Audio API
+    },
     "jarvis_local": {
         "label": "Джарвис XTTS (локальный клон, GPU)",
         "gender": "male",
@@ -237,6 +243,7 @@ class VoiceService:
         self._eleven = None
         self._hume = None
         self._xtts = None
+        self._fish = None
 
     def _get_eleven(self):
         if self._eleven is None:
@@ -258,6 +265,13 @@ class VoiceService:
 
             self._xtts = get_xtts()
         return self._xtts
+
+    def _get_fish(self):
+        if self._fish is None:
+            from app.services.voice_pkg.fish_audio import get_fish_audio
+
+            self._fish = get_fish_audio()
+        return self._fish
 
     async def transcribe(
         self,
@@ -284,9 +298,17 @@ class VoiceService:
         *,
         voice: str = "madirus",
         tone: str = "warm",
-        prefer: str = "auto",  # auto | elevenlabs | yandex | xtts
+        prefer: str = "auto",  # auto | elevenlabs | yandex | xtts | fish
     ) -> tuple[bytes | None, str]:
-        # XTTS: локальный Джарвис — используется при voice=jarvis_local или prefer=xtts
+        # Fish Audio: облачный Джарвис — при voice=jarvis_fish или prefer=fish
+        if prefer == "fish" or voice == "jarvis_fish":
+            fish = self._get_fish()
+            if fish.is_configured():
+                audio = await fish.synthesize(text, tone=tone)
+                if audio:
+                    return audio, "fish"
+
+        # XTTS: локальный Джарвис — при voice=jarvis_local или prefer=xtts
         if prefer == "xtts" or voice == "jarvis_local":
             xtts = self._get_xtts()
             if xtts.is_available():
@@ -303,7 +325,12 @@ class VoiceService:
             if audio:
                 return audio, "yandex"
 
-        # Fallback: XTTS если ничего другого нет
+        # Fallback chain: Fish Audio → XTTS
+        fish = self._get_fish()
+        if fish.is_configured():
+            audio = await fish.synthesize(text, tone=tone)
+            if audio:
+                return audio, "fish"
         xtts = self._get_xtts()
         if xtts.is_available():
             audio = await xtts.synthesize_to_ogg(text)
@@ -319,6 +346,14 @@ class VoiceService:
         voice: str = "madirus",
         tone: str = "warm",
     ) -> AsyncIterator[bytes]:
+        # Fish Audio streaming для jarvis_fish
+        if voice == "jarvis_fish":
+            fish = self._get_fish()
+            if fish.is_configured():
+                async for chunk in fish.synthesize_stream(text, tone=tone):
+                    yield chunk
+                return
+
         # XTTS streaming для jarvis_local
         if voice == "jarvis_local":
             xtts = self._get_xtts()
