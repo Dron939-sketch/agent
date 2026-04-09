@@ -1,4 +1,4 @@
-"""Встроенные tools: время, калькулятор, fetch URL, web search, погода."""
+"""Встроенные tools: время, калькулятор, fetch URL, web search, погода, напоминания, задачи."""
 
 from __future__ import annotations
 
@@ -9,6 +9,84 @@ from datetime import datetime, timezone
 import aiohttp
 
 from .registry import tool
+
+# ---------- напоминания и задачи ----------
+
+
+@tool(
+    name="create_reminder",
+    description="Создаёт напоминание на указанное время. Параметр description должен содержать время И текст, например: 'завтра в 9 утра позвонить маме', 'через 2 часа проверить почту'. Всегда используй этот инструмент когда пользователь просит напомнить или записать что-то.",
+)
+async def create_reminder(description: str, _user_id: str = "") -> str:
+    """Создаёт напоминание через ReminderManager."""
+    if not _user_id:
+        return "error: нет user_id"
+    try:
+        from app.services.tasks import get_reminder_manager
+
+        manager = get_reminder_manager()
+        result = await manager.create_from_text(_user_id, description, tz_offset=3)
+        scheduled = result.get("scheduled_at", "")
+        title = result.get("title", description)
+        rec = result.get("recurrence")
+        rec_text = f" (повтор: {rec})" if rec else ""
+        dt_str = ""
+        if scheduled:
+            try:
+                from datetime import datetime as _dt
+
+                dt = _dt.fromisoformat(str(scheduled).replace("Z", "+00:00"))
+                dt_str = dt.strftime(" на %d.%m в %H:%M")
+            except Exception:
+                dt_str = f" на {scheduled}"
+        return f"Напоминание создано{rec_text}: «{title}»{dt_str}"
+    except ValueError as e:
+        return f"Не смог разобрать время: {e}. Попробуй формат: 'завтра в 10:00 текст'"
+    except Exception as exc:
+        return f"error: {exc}"
+
+
+@tool(
+    name="create_task",
+    description="Добавляет задачу в список дел пользователя. Используй когда пользователь говорит: запиши, добавь задачу, в блокнот, запомни что нужно сделать.",
+)
+async def create_task(title: str, _user_id: str = "") -> str:
+    """Создаёт задачу."""
+    if not _user_id:
+        return "error: нет user_id"
+    try:
+        from app.services.tasks import get_reminder_manager
+
+        manager = get_reminder_manager()
+        result = await manager.create(_user_id, title)
+        return f"Задача добавлена: «{result.get('title', title)}»"
+    except Exception as exc:
+        return f"error: {exc}"
+
+
+@tool(
+    name="list_reminders",
+    description="Показывает список активных напоминаний и задач пользователя.",
+)
+async def list_reminders(_user_id: str = "") -> str:
+    """Список напоминаний."""
+    if not _user_id:
+        return "error: нет user_id"
+    try:
+        from app.services.tasks import get_reminder_manager
+
+        manager = get_reminder_manager()
+        items = await manager.list(_user_id)
+        if not items:
+            return "Нет активных напоминаний."
+        lines = []
+        for r in items[:10]:
+            title = r.get("title", "?")
+            scheduled = r.get("scheduled_at", "")
+            lines.append(f"• {title}" + (f" ({scheduled})" if scheduled else ""))
+        return "\n".join(lines)
+    except Exception as exc:
+        return f"error: {exc}"
 
 # ---------- безопасный калькулятор ----------
 
