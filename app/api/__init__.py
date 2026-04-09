@@ -28,6 +28,7 @@ from . import system as system_router
 from . import triggers as triggers_router
 from . import vision as vision_router
 from . import voice as voice_router
+from . import telegram as telegram_router
 
 logger = get_logger(__name__)
 
@@ -195,6 +196,7 @@ def create_app() -> FastAPI:
     app.include_router(coach_router.router)
     app.include_router(reminders_router.router)
     app.include_router(triggers_router.router)
+    app.include_router(telegram_router.router)
 
     return app
 

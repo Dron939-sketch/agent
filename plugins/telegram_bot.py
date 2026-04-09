@@ -138,11 +138,25 @@ if _BOT_TOKEN:
 
     # ---------- message processing ----------
 
+    async def _resolve_user_id(chat_id: int) -> str:
+        """Ищет user_id по chat_id — сначала в памяти, потом в БД."""
+        if chat_id in _user_map:
+            return _user_map[chat_id]
+        try:
+            from app.api.telegram import get_user_id_by_chat_id
+            db_user_id = await get_user_id_by_chat_id(chat_id)
+            if db_user_id:
+                _user_map[chat_id] = db_user_id  # кешируем
+                return db_user_id
+        except Exception as exc:
+            logger.debug("DB user lookup failed: %s", exc)
+        return f"tg_{chat_id}"
+
     async def _process_telegram_message(chat_id: int, text: str, username: str) -> str:
         """Обрабатывает текст сообщения из Telegram и возвращает ответ."""
         from app.services.llm import ChatMessage, default_router
 
-        user_id = _user_map.get(chat_id, f"tg_{chat_id}")
+        user_id = await _resolve_user_id(chat_id)
 
         # Обработка команд
         if text.startswith("/start"):
@@ -155,6 +169,26 @@ if _BOT_TOKEN:
                 "• /goals — активные цели\n"
                 "• /habits — привычки"
             )
+
+        if text.startswith("/link "):
+            code = text[6:].strip().upper()
+            if not code:
+                return "Введи код: /link <код из приложения>"
+            try:
+                import aiohttp as _aio
+                async with _aio.ClientSession() as _s:
+                    async with _s.post(
+                        f"http://localhost:{os.environ.get('PORT', '8000')}/api/telegram/confirm",
+                        json={"code": code, "chat_id": chat_id},
+                        timeout=10,
+                    ) as resp:
+                        if resp.status == 200:
+                            _user_map[chat_id] = (await resp.json()).get("user_id", f"tg_{chat_id}")
+                            return "Аккаунт привязан! Теперь я знаю кто ты. Напоминания и задачи будут синхронизированы."
+                        body = await resp.text()
+                        return f"Код недействителен или истёк. Получи новый в приложении."
+            except Exception as exc:
+                return f"Ошибка привязки: {exc}"
 
         if text.startswith("/remind "):
             from app.services.tasks import get_reminder_manager
