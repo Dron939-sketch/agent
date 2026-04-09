@@ -43,6 +43,7 @@ _SERVICE_ACCOUNTS = [
 
 async def _ensure_service_accounts() -> None:
     """Создаёт сервисные аккаунты если их ещё нет в БД."""
+    logger.info("_ensure_service_accounts: starting, %d accounts to check", len(_SERVICE_ACCOUNTS))
     from app.auth.service import AuthService
     from app.db import UserRepository
 
@@ -65,7 +66,8 @@ async def _ensure_service_accounts() -> None:
                 else:
                     logger.warning("Failed to create service account '%s'", account["username"])
         except Exception as exc:
-            logger.warning("Service account '%s' seed error: %s", account["username"], exc)
+            import traceback
+            logger.error("Service account '%s' seed error: %s\n%s", account["username"], exc, traceback.format_exc())
 
 
 @asynccontextmanager
