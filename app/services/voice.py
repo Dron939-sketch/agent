@@ -2,6 +2,7 @@
 
 TTS fallback chain: Fish Audio (Jarvis) → ElevenLabs → Yandex madirus.
 Fish Audio — основной TTS, голос Джарвиса из Iron Man.
+Web: mp3 формат (для <audio> элемента). Telegram: opus (для sendVoice).
 Скорость speech +21% для Yandex fallback (1.10 × 1.10, см. SPEED_BOOST).
 """
 
@@ -201,6 +202,8 @@ class VoiceService:
 
     TTS fallback chain: Fish Audio → ElevenLabs → Yandex.
     Fish Audio — основной TTS (голос Джарвиса из Iron Man).
+    Web: mp3 (браузерный <audio> не поддерживает opus).
+    Telegram: opus (через synthesize_opus напрямую).
     """
 
     def __init__(
@@ -217,21 +220,18 @@ class VoiceService:
     def _get_eleven(self):
         if self._eleven is None:
             from app.services.voice_pkg.elevenlabs import ElevenLabsTTS
-
             self._eleven = ElevenLabsTTS()
         return self._eleven
 
     def _get_fish(self):
         if self._fish is None:
             from app.services.voice_pkg.fish_audio import FishAudioTTS
-
             self._fish = FishAudioTTS()
         return self._fish
 
     def _get_hume(self):
         if self._hume is None:
             from app.services.voice_pkg.hume import HumeVoiceEmotion
-
             self._hume = HumeVoiceEmotion()
         return self._hume
 
@@ -263,10 +263,11 @@ class VoiceService:
         prefer: str = "auto",  # auto | fish | elevenlabs | yandex
     ) -> tuple[bytes | None, str]:
         # Fish Audio — приоритетный TTS (голос Джарвиса)
+        # mp3 для веб-плеера (opus не поддерживается браузерным <audio>)
         if prefer in ("auto", "fish"):
             fish = self._get_fish()
             if fish.is_configured():
-                audio = await fish.synthesize(text, tone=tone)
+                audio = await fish.synthesize(text, tone=tone, format="mp3")
                 if audio:
                     return audio, "fish_audio"
 
@@ -290,10 +291,10 @@ class VoiceService:
         voice: str = "madirus",
         tone: str = "warm",
     ) -> AsyncIterator[bytes]:
-        # Fish Audio — приоритетный стрим
+        # Fish Audio — приоритетный стрим (mp3 для веб-плеера)
         fish = self._get_fish()
         if fish.is_configured():
-            async for chunk in fish.stream(text, tone=tone):
+            async for chunk in fish.stream(text, tone=tone, format="mp3"):
                 yield chunk
             return
 
