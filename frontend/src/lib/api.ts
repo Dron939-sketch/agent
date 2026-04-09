@@ -86,6 +86,54 @@ function apiBase(): string {
   return _apiBaseCache;
 }
 
+let _refreshing: Promise<boolean> | null = null;
+
+async function tryRefreshToken(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  const stored = localStorage.getItem("freddy-session");
+  if (!stored) return false;
+  try {
+    const parsed = JSON.parse(stored);
+    const refreshToken = parsed?.state?.refreshToken;
+    if (!refreshToken) return false;
+
+    const res = await fetch(`${apiBase()}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { access_token: string; refresh_token: string };
+
+    // Обновляем localStorage напрямую (freddy_token)
+    localStorage.setItem("freddy_token", data.access_token);
+
+    // Обновляем Zustand persist store
+    parsed.state.token = data.access_token;
+    parsed.state.refreshToken = data.refresh_token;
+    localStorage.setItem("freddy-session", JSON.stringify(parsed));
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Fetch с авто-refresh при 401 */
+async function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, init);
+  if (res.status !== 401) return res;
+
+  // Один refresh на все параллельные 401
+  if (!_refreshing) _refreshing = tryRefreshToken().finally(() => { _refreshing = null; });
+  const ok = await _refreshing;
+  if (!ok) return res;
+
+  // Повторяем запрос с новым токеном
+  const newInit = { ...init, headers: { ...init?.headers, ...authHeaders() } };
+  return fetch(input, newInit);
+}
+
 function authHeaders(): HeadersInit {
   if (typeof window === "undefined") return {};
   const token = localStorage.getItem("freddy_token");
@@ -415,15 +463,16 @@ export async function sendFeedback(
 
 // === Auth ===
 
-export async function login(username: string, password: string): Promise<void> {
+export async function login(username: string, password: string): Promise<{ access_token: string; refresh_token: string }> {
   const res = await fetch(`${apiBase()}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password })
   });
   if (!res.ok) throw new Error(`login ${res.status}`);
-  const data = (await res.json()) as { access_token: string };
+  const data = (await res.json()) as { access_token: string; refresh_token: string };
   localStorage.setItem("freddy_token", data.access_token);
+  return data;
 }
 
 export async function ping(): Promise<boolean> {
@@ -433,6 +482,31 @@ export async function ping(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Проактивное обновление токена — вызывается при загрузке страницы.
+ * Если access_token скоро протухнет (< 2ч), обновляет через refresh_token.
+ */
+export async function ensureFreshToken(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const token = localStorage.getItem("freddy_token");
+  if (!token) return;
+
+  // Проверяем exp из JWT payload (base64)
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    const exp = payload.exp as number;
+    const now = Math.floor(Date.now() / 1000);
+    // Если до истечения > 2 часов — не обновляем
+    if (exp - now > 7200) return;
+  } catch {
+    // Не можем декодировать — пробуем refresh на всякий случай
+  }
+
+  await tryRefreshToken();
 }
 
 export async function getIntegrations(): Promise<Record<string, unknown>> {

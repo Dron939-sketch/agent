@@ -8,6 +8,7 @@ export type Profile = "smart" | "fast" | "cheap" | "local";
 
 type SessionState = {
   token: string | null;
+  refreshToken: string | null;
   username: string | null;
   profile: Profile;
   locale: Locale;
@@ -17,7 +18,7 @@ type SessionState = {
   voice: string;
   /** Wake word "Фреди" — постоянное прослушивание в голосовом режиме. */
   alwaysListening: boolean;
-  setAuth: (token: string, username: string) => void;
+  setAuth: (token: string, username: string, refreshToken?: string) => void;
   logout: () => void;
   setProfile: (p: Profile) => void;
   setLocale: (l: Locale) => void;
@@ -31,6 +32,7 @@ export const useSession = create<SessionState>()(
   persist(
     (set) => ({
       token: null,
+      refreshToken: null,
       username: null,
       profile: "smart",
       locale: "ru",
@@ -38,8 +40,8 @@ export const useSession = create<SessionState>()(
       voiceReply: true,
       voice: "jarvis_fish",
       alwaysListening: false,
-      setAuth: (token, username) => set({ token, username }),
-      logout: () => set({ token: null, username: null }),
+      setAuth: (token, username, refreshToken) => set({ token, username, refreshToken: refreshToken ?? null }),
+      logout: () => set({ token: null, refreshToken: null, username: null }),
       setProfile: (profile) => set({ profile }),
       setLocale: (locale) => set({ locale }),
       setVoiceReply: (voiceReply) => set({ voiceReply }),
@@ -51,6 +53,7 @@ export const useSession = create<SessionState>()(
       name: "freddy-session",
       partialize: (s) => ({
         token: s.token,
+        refreshToken: s.refreshToken,
         username: s.username,
         profile: s.profile,
         locale: s.locale,

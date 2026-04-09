@@ -17,8 +17,8 @@ from app.core.config import Config
 logger = logging.getLogger(__name__)
 
 ALGORITHM = "HS256"
-ACCESS_TTL_SECONDS = 60 * 60          # 1 час
-REFRESH_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 дней
+ACCESS_TTL_SECONDS = 60 * 60 * 24          # 24 часа
+REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30   # 30 дней
 
 # Стабильный per-process кеш SECRET_KEY: вычисляется один раз при первом
 # использовании, читая ENV (а не Config-snapshot модуля). Это критично для

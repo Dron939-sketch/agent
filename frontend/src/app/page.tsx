@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
+import { ensureFreshToken } from "@/lib/api";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { AgentTimeline } from "@/components/timeline/AgentTimeline";
 import { DashboardTiles } from "@/components/dashboard/DashboardTiles";
@@ -46,6 +47,9 @@ type AgentState = "idle" | "thinking" | "speaking";
 
 export default function HomePage() {
   const [agentState, setAgentState] = useState<AgentState>("idle");
+
+  // Проактивно обновляем токен при загрузке если скоро протухнет
+  useEffect(() => { ensureFreshToken(); }, []);
 
   return (
     <main className="relative min-h-screen">
