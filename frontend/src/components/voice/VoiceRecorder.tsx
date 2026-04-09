@@ -54,11 +54,27 @@ export function VoiceRecorder() {
     setPhase("recording");
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Проверка поддержки MediaRecorder
+      if (typeof MediaRecorder === "undefined") {
+        setError("Ваш браузер не поддерживает запись аудио");
+        setPhase("error");
+        return;
+      }
+
+      // Аудио с шумоподавлением и эхоподавлением
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
       mediaRef.current = stream;
 
-      const ctx = new (window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) { setError("Web Audio API не поддерживается"); setPhase("error"); return; }
+      const ctx = new AudioCtx();
       audioCtxRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
@@ -93,20 +109,21 @@ export function VoiceRecorder() {
       vad.start();
       vadRef.current = vad;
 
-      // Safari может не поддерживать webm — пробуем совместимый MIME
+      // Совместимый MIME для всех браузеров (Safari: mp4, Chrome/FF: webm)
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : MediaRecorder.isTypeSupported("audio/webm")
           ? "audio/webm"
           : MediaRecorder.isTypeSupported("audio/mp4")
             ? "audio/mp4"
-            : undefined;
+            : "";
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const actualMime = mimeType || "audio/webm";
       chunksRef.current = [];
       recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
       recorder.onstop = async () => {
         cleanupRecording();
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const blob = new Blob(chunksRef.current, { type: actualMime });
         if (blob.size < 1000) {
           setPhase("idle");
           return;
@@ -114,9 +131,20 @@ export function VoiceRecorder() {
         await runFullLoop(blob);
       };
       recorderRef.current = recorder;
-      recorder.start();
+      try { recorder.start(); } catch (startErr) {
+        setError(`Ошибка записи: ${(startErr as Error).message}`);
+        setPhase("error");
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
     } catch (err) {
-      setError((err as Error).message);
+      const e = err as DOMException;
+      const msg = e.name === "NotAllowedError" ? "Разрешите доступ к микрофону в настройках браузера"
+        : e.name === "NotFoundError" ? "Микрофон не найден"
+        : e.name === "NotReadableError" ? "Микрофон занят другим приложением"
+        : e.name === "SecurityError" ? "Нужен HTTPS для доступа к микрофону"
+        : e.message || "Ошибка микрофона";
+      setError(msg);
       setPhase("error");
     }
   }
