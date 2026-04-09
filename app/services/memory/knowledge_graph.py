@@ -222,7 +222,7 @@ async def synthesize_insights(user_id: str) -> int:
             try:
                 await repo.add_insight(user_id, cat, ins)
                 stored += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("add_insight failed: %s", exc)
 
     return stored

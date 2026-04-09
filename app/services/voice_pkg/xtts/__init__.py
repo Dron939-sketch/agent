@@ -31,9 +31,13 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Resolve project root for relative paths
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent  # → repo root
+
 # Конфигурация
 XTTS_DEVICE = os.environ.get("XTTS_DEVICE", "auto")
-XTTS_SPEAKER_WAV = os.environ.get("XTTS_SPEAKER_WAV", "data/voices/jarvis.wav")
+_DEFAULT_WAV = str(_PROJECT_ROOT / "data" / "voices" / "jarvis.wav")
+XTTS_SPEAKER_WAV = os.environ.get("XTTS_SPEAKER_WAV", _DEFAULT_WAV)
 XTTS_MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
 
 # Язык → код XTTS

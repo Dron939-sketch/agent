@@ -40,8 +40,23 @@ class WeatherAlertTrigger(Trigger):
         if not key:
             return []
 
+        # Город из контекста пользователя или Moscow по умолчанию
+        city = "Moscow"
         try:
-            url = f"https://api.openweathermap.org/data/2.5/weather?q=Moscow&appid={key}&units=metric&lang=ru"
+            from sqlalchemy import select as sa_select
+            async with session_scope() as session:
+                from app.db import User
+                result = await session.execute(sa_select(User).where(User.user_id == user_id))
+                user = result.scalar_one_or_none()
+                if user and user.context:
+                    import json as _json
+                    ctx = _json.loads(user.context)
+                    city = ctx.get("city", city)
+        except Exception:
+            pass
+
+        try:
+            url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={key}&units=metric&lang=ru"
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=5) as resp:
                     if resp.status != 200:
