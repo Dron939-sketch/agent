@@ -1,7 +1,8 @@
-"""Voice services: STT (Deepgram + Yandex) + TTS (ElevenLabs + Yandex с SSML).
+"""Voice services: STT (Deepgram + Yandex) + TTS (Fish Audio + ElevenLabs + Yandex).
 
-Голос `madirus` (сербский баритон) — звучит как Милош Бикович.
-Скорость speech +21% относительно дефолта Yandex (1.10 × 1.10, см. SPEED_BOOST).
+TTS fallback chain: Fish Audio (Jarvis) → ElevenLabs → Yandex madirus.
+Fish Audio — основной TTS, голос Джарвиса из Iron Man.
+Скорость speech +21% для Yandex fallback (1.10 × 1.10, см. SPEED_BOOST).
 """
 
 from __future__ import annotations
@@ -20,21 +21,19 @@ DEEPGRAM_URL = "https://api.deepgram.com/v1/listen"
 YANDEX_STT_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 YANDEX_TTS_URL = "https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize"
 
-# === Каталог голосов Yandex SpeechKit ===
-# Примечание: "jarvis" — пресет с голосом filipp в стиле Джарвиса из рус. дубляжа
-# (Алексей Колган): спокойный, размеренный, чуть холодный, без лишних эмоций).
+# === Каталог голосов Yandex SpeechKit (fallback) ===
 YANDEX_VOICES = {
     "madirus": {
         "label": "Madirus (сербский баритон, ~Бикович)",
         "gender": "male",
         "accent": "serbian",
-        "default": True,
+        "default": False,
     },
     "jarvis": {
         "label": "Джарвис (рус. дубляж, ~Колган)",
         "gender": "male",
         "accent": "russian",
-        "yandex_voice": "filipp",  # Mapping: jarvis → filipp с настройками
+        "yandex_voice": "filipp",
     },
     "filipp": {"label": "Филипп (спокойный)", "gender": "male"},
     "ermil": {"label": "Ермил (выразительный)", "gender": "male"},
@@ -46,20 +45,14 @@ YANDEX_VOICES = {
     "omazh": {"label": "Омаж (мягкий)", "gender": "female"},
 }
 
-# Специальные настройки для пресета "jarvis"
-# Стиль Алексея Колгана: спокойный, чёткий, нейтральная эмоция, чуть замедленная речь.
 JARVIS_SETTINGS = {
     "yandex_voice": "filipp",
     "emotion": "neutral",
-    "speed_multiplier": 0.95,  # Чуть медленнее — более «AI-ассистентский»
+    "speed_multiplier": 0.95,
 }
 
-# Глобальный множитель скорости речи. 1.21 = +21% (быстрее).
-# Итерировали: сначала 1.10, потом ещё раз +10% по просьбе пользователя,
-# итого 1.10 × 1.10 = 1.21 относительно дефолта Yandex.
 SPEED_BOOST = 1.21
 
-# Эмоциональная окраска по нашим внутренним tone'ам (base speed)
 _TONE_BASE = {
     "warm": ("good", 1.0),
     "calm": ("neutral", 0.95),
@@ -69,7 +62,6 @@ _TONE_BASE = {
     "clarifying": ("neutral", 0.97),
 }
 
-# Финальные значения с применённым boost'ом. Yandex принимает speed в [0.1; 3.0].
 TONE_TO_YANDEX = {
     name: (emotion, round(min(3.0, max(0.1, base_speed * SPEED_BOOST)), 3))
     for name, (emotion, base_speed) in _TONE_BASE.items()
@@ -77,16 +69,8 @@ TONE_TO_YANDEX = {
 
 
 def text_to_ssml(text: str) -> str:
-    """Превращает обычный текст в SSML с естественными паузами.
-
-    Правила (эмулируют «Бикович-стиль» — задумчивый, с паузами):
-    - `…` или `...` → пауза 500ms
-    - двойной перенос строки → пауза 700ms
-    - одиночный перенос → 200ms
-    """
     if not text:
         return text
-
     safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     safe = re.sub(r"\.{3,}|…", '<break time="500ms"/>', safe)
     safe = re.sub(r"\n\s*\n", '<break time="700ms"/>', safe)
@@ -170,15 +154,11 @@ class YandexSpeechKit:
         tone: str = "warm",
         use_ssml: bool = True,
     ) -> bytes | None:
-        """Синтез речи Yandex с SSML и эмоциями."""
         if not self.api_key:
             return None
-
         emotion, speed = TONE_TO_YANDEX.get(
             tone, ("neutral", round(1.0 * SPEED_BOOST, 3))
         )
-
-        # Пресет "jarvis": маппим на filipp с нейтральной эмоцией и чуть замедленной речью
         actual_voice = voice
         if voice == "jarvis":
             actual_voice = JARVIS_SETTINGS["yandex_voice"]
@@ -186,7 +166,6 @@ class YandexSpeechKit:
             speed = round(speed * JARVIS_SETTINGS["speed_multiplier"], 3)
         elif voice == "madirus":
             emotion = "neutral"
-
         headers = {"Authorization": f"Api-Key {self.api_key}"}
         data: dict[str, str] = {
             "voice": actual_voice,
@@ -195,12 +174,10 @@ class YandexSpeechKit:
             "format": "oggopus",
             "lang": "ru-RU",
         }
-
         if use_ssml:
             data["ssml"] = text_to_ssml(text[:1500])
         else:
             data["text"] = text[:1500]
-
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -220,7 +197,11 @@ class YandexSpeechKit:
 
 
 class VoiceService:
-    """Унифицированный фасад: STT + TTS + voice emotion."""
+    """Унифицированный фасад: STT + TTS + voice emotion.
+
+    TTS fallback chain: Fish Audio → ElevenLabs → Yandex.
+    Fish Audio — основной TTS (голос Джарвиса из Iron Man).
+    """
 
     def __init__(
         self,
@@ -230,6 +211,7 @@ class VoiceService:
         self.deepgram = deepgram or DeepgramSTT()
         self.yandex = yandex or YandexSpeechKit()
         self._eleven = None
+        self._fish = None
         self._hume = None
 
     def _get_eleven(self):
@@ -238,6 +220,13 @@ class VoiceService:
 
             self._eleven = ElevenLabsTTS()
         return self._eleven
+
+    def _get_fish(self):
+        if self._fish is None:
+            from app.services.voice_pkg.fish_audio import FishAudioTTS
+
+            self._fish = FishAudioTTS()
+        return self._fish
 
     def _get_hume(self):
         if self._hume is None:
@@ -271,12 +260,23 @@ class VoiceService:
         *,
         voice: str = "madirus",
         tone: str = "warm",
-        prefer: str = "auto",  # auto | elevenlabs | yandex
+        prefer: str = "auto",  # auto | fish | elevenlabs | yandex
     ) -> tuple[bytes | None, str]:
+        # Fish Audio — приоритетный TTS (голос Джарвиса)
+        if prefer in ("auto", "fish"):
+            fish = self._get_fish()
+            if fish.is_configured():
+                audio = await fish.synthesize(text, tone=tone)
+                if audio:
+                    return audio, "fish_audio"
+
+        # ElevenLabs — premium fallback
         if prefer in ("auto", "elevenlabs") and Config.ELEVENLABS_API_KEY:
             audio = await self._get_eleven().synthesize(text, tone=tone)
             if audio:
                 return audio, "elevenlabs"
+
+        # Yandex — базовый fallback
         if Config.YANDEX_API_KEY:
             audio = await self.yandex.synthesize(text, voice=voice, tone=tone)
             if audio:
@@ -290,10 +290,20 @@ class VoiceService:
         voice: str = "madirus",
         tone: str = "warm",
     ) -> AsyncIterator[bytes]:
+        # Fish Audio — приоритетный стрим
+        fish = self._get_fish()
+        if fish.is_configured():
+            async for chunk in fish.stream(text, tone=tone):
+                yield chunk
+            return
+
+        # ElevenLabs stream
         if Config.ELEVENLABS_API_KEY:
             async for chunk in self._get_eleven().stream(text, tone=tone):
                 yield chunk
             return
+
+        # Yandex — не стримит, отдаём целиком
         audio, _ = await self.synthesize(text, voice=voice, tone=tone, prefer="yandex")
         if audio:
             yield audio
@@ -309,7 +319,17 @@ class VoiceService:
         return await self._get_hume().analyze(audio_bytes, content_type=content_type)
 
     def list_voices(self) -> dict[str, dict]:
-        return YANDEX_VOICES
+        voices = dict(YANDEX_VOICES)
+        fish = self._get_fish()
+        if fish.is_configured():
+            voices["jarvis"] = {
+                "label": "Джарвис (Fish Audio — Iron Man style)",
+                "gender": "male",
+                "accent": "english",
+                "default": True,
+                "provider": "fish_audio",
+            }
+        return voices
 
     # Backward-compat
     async def speech_to_text(self, audio_bytes: bytes, format: str = "ogg") -> str | None:  # noqa: ARG002
