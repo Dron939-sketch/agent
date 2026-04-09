@@ -88,7 +88,7 @@ export function VoiceRecorder() {
           }
         },
         threshold: 0.05,
-        silenceMs: 1500
+        silenceMs: 1000
       });
       vad.start();
       vadRef.current = vad;

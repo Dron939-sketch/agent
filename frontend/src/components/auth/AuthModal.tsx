@@ -8,8 +8,6 @@ import { resolveApiUrl } from "@/lib/api";
 
 type Mode = "login" | "register";
 
-const API = resolveApiUrl();
-
 type ValidationItem = { loc?: (string | number)[]; msg?: string };
 
 function formatError(status: number, payload: unknown): string {
@@ -28,7 +26,11 @@ function formatError(status: number, payload: unknown): string {
 }
 
 async function apiPost(path: string, body: unknown) {
-  const res = await fetch(`${API}${path}`, {
+  // API URL резолвится внутри функции, а не на module-init level —
+  // иначе chunk с этим модулем может попасть в TDZ при lazy загрузке
+  // (см. историю #38/#39 фиксов — тот же паттерн, но в AuthModal пропустил).
+  const apiUrl = resolveApiUrl();
+  const res = await fetch(`${apiUrl}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)

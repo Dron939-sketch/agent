@@ -1,21 +1,22 @@
-"""Fish Audio TTS — облачный провайдер с клоном голоса Джарвиса.
+"""Fish Audio TTS клиент — голос Джарвиса.
 
-Быстрый (<500ms), качественный (90%+), готовый голос Джарвиса из каталога.
-Поддержка эмоций: [whisper], [excited], [calm], [angry] и 50+ тегов.
+Fish Audio: https://fish.audio — премиум TTS с клонированными голосами.
+Используется как **основной** TTS провайдер (замена Yandex SpeechKit).
 
 Env:
-  FISH_AUDIO_API_KEY=...          (получить: https://fish.audio/)
-  FISH_AUDIO_JARVIS_VOICE_ID=612b878b113047d9a770c069c8b4fdfe  (default)
+  FISH_AUDIO_API_KEY   — API-токен с https://fish.audio/app/api-keys/
+  FISH_AUDIO_VOICE_ID  — ID голосовой модели из каталога Fish Audio
+                         (найди Jarvis-like на https://fish.audio/discover/)
 
-Тарифы:
-  Free: 7 мин/мес, 500 символов/запрос
-  Plus: $5.50/мес, 200 мин, 15000 символов, API
-  Pay-as-you-go: $15/1M bytes (~12ч речи)
+API:
+  POST https://api.fish.audio/v1/tts
+  Auth: Authorization: Bearer {key}
+  Body: {"text": "...", "reference_id": "...", "format": "opus", ...}
+  Response: audio bytes (streaming)
 """
 
 from __future__ import annotations
 
-import io
 import os
 from collections.abc import AsyncIterator
 
@@ -25,197 +26,141 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-FISH_API_URL = "https://api.fish.audio/v1/tts"
-FISH_API_KEY = os.environ.get("FISH_AUDIO_API_KEY", "")
+API_URL = "https://api.fish.audio/v1/tts"
 
-# Голос Джарвиса (русский) — выбран пользователем на Fish Audio
-JARVIS_VOICE_ID = os.environ.get(
-    "FISH_AUDIO_JARVIS_VOICE_ID",
-    "18be58f762644714b0756fd4d94c634c",
-)
-
-# Маппинг наших tone → Fish Audio emotion tags
-TONE_TO_EMOTION: dict[str, str] = {
-    "warm": "",
-    "calm": "[calm]",
-    "energetic": "[excited]",
-    "supportive": "[gentle]",
-    "playful": "[happy]",
-    "clarifying": "",
-    "jarvis": "[calm]",  # Джарвис всегда спокоен
-}
+# Default Jarvis-like voice. Пользователь может переопределить через
+# FISH_AUDIO_VOICE_ID. Это ID из Fish Audio marketplace.
+DEFAULT_VOICE_ID = ""  # Задаётся через env
 
 
 class FishAudioTTS:
-    """Fish Audio TTS провайдер с поддержкой клонированных голосов."""
+    """Fish Audio TTS с поддержкой streaming и multiple output formats."""
 
     def __init__(
         self,
         api_key: str | None = None,
         voice_id: str | None = None,
     ) -> None:
-        self.api_key = api_key or FISH_API_KEY
-        self.voice_id = voice_id or JARVIS_VOICE_ID
+        self.api_key = (
+            api_key
+            or os.environ.get("FISH_AUDIO_API_KEY", "")
+        ).strip()
+        self.voice_id = (
+            voice_id
+            or os.environ.get("FISH_AUDIO_VOICE_ID", "")
+            or DEFAULT_VOICE_ID
+        ).strip()
 
     def is_configured(self) -> bool:
         return bool(self.api_key)
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _body(
+        self,
+        text: str,
+        *,
+        format: str = "opus",
+        voice_id: str | None = None,
+    ) -> dict:
+        body: dict = {
+            "text": text[:2000],  # Fish Audio text limit
+            "format": format,
+            "latency": "balanced",  # "normal" для лучшего качества, "balanced" для скорости
+        }
+        vid = voice_id or self.voice_id
+        if vid:
+            body["reference_id"] = vid
+        return body
 
     async def synthesize(
         self,
         text: str,
         *,
+        tone: str = "warm",  # для совместимости API, Fish Audio не использует tone
+        format: str = "opus",
         voice_id: str | None = None,
-        tone: str = "warm",
-        format: str = "mp3",
     ) -> bytes | None:
-        """Генерирует аудио через Fish Audio API.
-
-        Returns: audio bytes (mp3/wav/ogg) или None при ошибке.
-        """
-        if not self.is_configured():
+        """Синтез речи — возвращает полный аудио-файл."""
+        if not self.is_configured() or not text:
             return None
-
-        vid = voice_id or self.voice_id
-
-        # Добавляем emotion tag если есть
-        emotion_tag = TONE_TO_EMOTION.get(tone, "")
-        processed_text = f"{emotion_tag} {text}".strip() if emotion_tag else text
-
-        payload = {
-            "text": processed_text[:2000],
-            "reference_id": vid,
-            "format": format,
-            "streaming": False,
-        }
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    FISH_API_URL,
-                    json=payload,
-                    headers=headers,
+                    API_URL,
+                    headers=self._headers(),
+                    json=self._body(text, format=format, voice_id=voice_id),
                     timeout=aiohttp.ClientTimeout(total=30),
                 ) as resp:
                     if resp.status != 200:
                         body = await resp.text()
-                        logger.error("Fish Audio TTS %s: %s", resp.status, body[:300])
+                        logger.error(
+                            "Fish Audio TTS %s: %s", resp.status, body[:300]
+                        )
                         return None
                     audio = await resp.read()
+                    if len(audio) < 100:
+                        logger.warning("Fish Audio TTS returned tiny audio (%d bytes)", len(audio))
+                        return None
                     logger.info(
-                        "Fish Audio: synthesized %d chars, %d bytes (%s)",
-                        len(text), len(audio), format,
+                        "🐟 Fish Audio TTS: %d bytes, format=%s", len(audio), format
                     )
                     return audio
         except Exception as exc:
-            logger.error("Fish Audio TTS error: %s", exc)
+            logger.exception("Fish Audio TTS error: %s", exc)
             return None
 
-    async def synthesize_stream(
+    async def synthesize_opus(
         self,
         text: str,
         *,
         voice_id: str | None = None,
+    ) -> bytes | None:
+        """Opus формат — подходит для Telegram sendVoice."""
+        return await self.synthesize(text, format="opus", voice_id=voice_id)
+
+    async def synthesize_mp3(
+        self,
+        text: str,
+        *,
+        voice_id: str | None = None,
+    ) -> bytes | None:
+        """MP3 формат — для web-плеера."""
+        return await self.synthesize(text, format="mp3", voice_id=voice_id)
+
+    async def stream(
+        self,
+        text: str,
+        *,
         tone: str = "warm",
-        chunk_size: int = 4096,
+        format: str = "opus",
+        voice_id: str | None = None,
     ) -> AsyncIterator[bytes]:
-        """Streaming TTS — отдаёт audio chunks по мере генерации."""
-        if not self.is_configured():
+        """Streaming TTS — возвращает чанки по мере генерации."""
+        if not self.is_configured() or not text:
             return
-
-        vid = voice_id or self.voice_id
-        emotion_tag = TONE_TO_EMOTION.get(tone, "")
-        processed_text = f"{emotion_tag} {text}".strip() if emotion_tag else text
-
-        payload = {
-            "text": processed_text[:2000],
-            "reference_id": vid,
-            "format": "mp3",
-            "streaming": True,
-        }
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    FISH_API_URL,
-                    json=payload,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=60),
+                    API_URL,
+                    headers=self._headers(),
+                    json=self._body(text, format=format, voice_id=voice_id),
+                    timeout=aiohttp.ClientTimeout(total=30),
                 ) as resp:
                     if resp.status != 200:
                         body = await resp.text()
-                        logger.error("Fish Audio stream %s: %s", resp.status, body[:300])
+                        logger.error(
+                            "Fish Audio stream %s: %s", resp.status, body[:300]
+                        )
                         return
-                    async for chunk in resp.content.iter_chunked(chunk_size):
-                        yield chunk
+                    async for chunk in resp.content.iter_any():
+                        if chunk:
+                            yield chunk
         except Exception as exc:
-            logger.error("Fish Audio stream error: %s", exc)
-
-    async def clone_voice(
-        self,
-        audio_bytes: bytes,
-        title: str = "Custom Voice",
-        description: str = "",
-    ) -> str | None:
-        """Создаёт persistent voice clone из аудио-сэмпла.
-
-        Returns: voice_id для последующего использования.
-        Требует 10-15 секунд чистого аудио.
-        """
-        if not self.is_configured():
-            return None
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-        }
-
-        form = aiohttp.FormData()
-        form.add_field("title", title)
-        form.add_field("description", description or f"Voice clone: {title}")
-        form.add_field(
-            "voices",
-            audio_bytes,
-            filename="sample.wav",
-            content_type="audio/wav",
-        )
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://api.fish.audio/v1/voices",
-                    data=form,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=60),
-                ) as resp:
-                    if resp.status not in (200, 201):
-                        body = await resp.text()
-                        logger.error("Fish Audio clone %s: %s", resp.status, body[:300])
-                        return None
-                    data = await resp.json()
-                    voice_id = data.get("id", "")
-                    logger.info("Fish Audio: voice cloned → %s", voice_id)
-                    return voice_id
-        except Exception as exc:
-            logger.error("Fish Audio clone error: %s", exc)
-            return None
-
-
-# === Singleton ===
-
-_instance: FishAudioTTS | None = None
-
-
-def get_fish_audio() -> FishAudioTTS:
-    global _instance
-    if _instance is None:
-        _instance = FishAudioTTS()
-    return _instance
+            logger.exception("Fish Audio stream error: %s", exc)

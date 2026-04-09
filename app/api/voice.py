@@ -207,23 +207,30 @@ async def full_loop(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty audio")
 
     voice_service = _service()
+    ct = audio.content_type or "audio/webm"
 
-    transcript, stt_provider = await voice_service.transcribe(
-        raw, content_type=audio.content_type or "audio/webm"
-    )
+    # === Параллельный STT + Hume emotion ===
+    # STT и Hume — независимые сетевые вызовы на одних и тех же аудио-байтах.
+    # Параллельный запуск экономит ~1-1.5 сек (время Hume не блокирует STT).
+    import asyncio
+
+    async def _stt() -> tuple[str | None, str]:
+        return await voice_service.transcribe(raw, content_type=ct)
+
+    async def _hume() -> dict | None:
+        try:
+            return await voice_service.voice_emotion(raw, content_type=ct)
+        except Exception as exc:
+            logger.warning("voice emotion failed: %s", exc)
+            return None
+
+    (transcript, stt_provider), voice_emo = await asyncio.gather(_stt(), _hume())
+
     if not transcript:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "STT failed — no provider or empty result",
         )
-
-    voice_emo: dict | None = None
-    try:
-        voice_emo = await voice_service.voice_emotion(
-            raw, content_type=audio.content_type or "audio/webm"
-        )
-    except Exception as exc:
-        logger.warning("voice emotion failed: %s", exc)
 
     # Удаляем wake word из начала транскрипта для обработки
     clean_transcript = strip_wake_word(transcript)
