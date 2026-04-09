@@ -29,6 +29,10 @@ const KnowledgeGraph = dynamic(
   () => import("@/components/dashboard/KnowledgeGraph").then((m) => m.KnowledgeGraph),
   { ssr: false }
 );
+const TelegramSettings = dynamic(
+  () => import("@/components/settings/TelegramSettings").then((m) => m.TelegramSettings),
+  { ssr: false }
+);
 const HeaderAuth = dynamic(
   () => import("@/components/layout/HeaderAuth").then((m) => m.HeaderAuth),
   { ssr: false }
@@ -98,9 +102,10 @@ export default function HomePage() {
       <MoodGraph id="mood" />
 
       {/* Sprint 8+7: Reminders + Knowledge Graph widgets */}
-      <section className="mx-auto grid max-w-7xl gap-4 px-4 pb-6 sm:px-6 md:grid-cols-2">
+      <section className="mx-auto grid max-w-7xl gap-4 px-4 pb-6 sm:px-6 md:grid-cols-3">
         <RemindersWidget />
         <KnowledgeGraph />
+        <TelegramSettings />
       </section>
 
       <DashboardTiles id="dashboard" />
