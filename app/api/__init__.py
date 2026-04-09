@@ -12,7 +12,7 @@ from app.core.autonomy import get_autonomy_loop
 from app.core.config import Config
 from app.core.logging import get_logger, setup_logging
 from app.core.observability import init_sentry
-from app.db import dispose_db, init_db
+from app.db import dispose_db, init_db, session_scope
 from app.plugins import load_plugins
 
 from . import agents as agents_router
@@ -31,6 +31,42 @@ from . import voice as voice_router
 
 logger = get_logger(__name__)
 
+# Сервисные аккаунты, создаются при старте если отсутствуют
+_SERVICE_ACCOUNTS = [
+    {
+        "username": "frederick_bot",
+        "email": "frederick@freddy.ru",
+        "password": "Fr3ddy_B0t_2026!",
+    },
+]
+
+
+async def _ensure_service_accounts() -> None:
+    """Создаёт сервисные аккаунты если их ещё нет в БД."""
+    from app.auth.service import AuthService
+    from app.db import UserRepository
+
+    for account in _SERVICE_ACCOUNTS:
+        try:
+            async with session_scope() as session:
+                repo = UserRepository(session)
+                existing = await repo.get_by_username(account["username"])
+                if existing:
+                    logger.info("Service account '%s' already exists", account["username"])
+                    continue
+                auth = AuthService(session)
+                user_id = await auth.register(
+                    username=account["username"],
+                    email=account["email"],
+                    password=account["password"],
+                )
+                if user_id:
+                    logger.info("Created service account '%s' (id=%s)", account["username"], user_id)
+                else:
+                    logger.warning("Failed to create service account '%s'", account["username"])
+        except Exception as exc:
+            logger.warning("Service account '%s' seed error: %s", account["username"], exc)
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):  # noqa: ANN201
@@ -38,6 +74,7 @@ async def lifespan(_app: FastAPI):  # noqa: ANN201
     init_sentry()
     Config.ensure_dirs()
     await init_db()
+    await _ensure_service_accounts()
     plugins = load_plugins()
 
     # Sprint 8: Register reminder handler with scheduler
