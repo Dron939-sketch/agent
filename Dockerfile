@@ -14,6 +14,7 @@ RUN apt-get update \
         libxslt1-dev \
         zlib1g-dev \
         curl \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

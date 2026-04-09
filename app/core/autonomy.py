@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Optional
 
 import aiohttp
@@ -155,9 +155,6 @@ class AutonomyLoop:
         self._task = None
         logger.info("🔁 AutonomyLoop stopped")
 
-
-# Импорт в конце для timedelta
-from datetime import timedelta  # noqa: E402
 
 _loop: AutonomyLoop | None = None
 
