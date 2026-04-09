@@ -21,8 +21,12 @@ export type WakeWordOptions = {
 
 export type WakeWordStatus = "listening" | "paused" | "stopped" | "error" | "unsupported";
 
-// Варианты написания wake word (lowercase)
-const WAKE_VARIANTS = ["фреди", "фредди", "freddy", "fredi", "фрэди", "фрэдди"];
+// Варианты написания wake word (lowercase) — включая частые ошибки распознавания
+const WAKE_VARIANTS = [
+  "фреди", "фредди", "freddy", "fredi", "фрэди", "фрэдди",
+  "фреді", "фредi", "fred", "freди", "преди", "предди",
+  "хреди", "хредди", "феди", "федди",
+];
 
 // Regex для поиска wake word в тексте
 const WAKE_REGEX = new RegExp(
@@ -101,6 +105,11 @@ export class WakeWordDetector {
     recognition.maxAlternatives = 3;
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      // Debug: логируем что распознаёт SpeechRecognition
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        console.debug(`[WakeWord] heard: "${t}" (final=${event.results[i].isFinal})`);
+      }
       this.handleResults(event);
     };
 
@@ -120,7 +129,7 @@ export class WakeWordDetector {
 
     recognition.onend = () => {
       if (!this.intentionalStop) {
-        // SpeechRecognition может останавливаться сам — перезапускаем
+        console.debug("[WakeWord] ended unexpectedly, restarting...");
         this.scheduleRestart();
       }
     };
@@ -130,6 +139,7 @@ export class WakeWordDetector {
     try {
       recognition.start();
       this.setStatus("listening");
+      console.info("[WakeWord] started listening for wake word");
       return true;
     } catch (err) {
       console.error("[WakeWord] start failed:", err);
