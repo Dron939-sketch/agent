@@ -47,13 +47,24 @@ async def _ensure_service_accounts() -> None:
     from app.auth.service import AuthService
     from app.db import UserRepository
 
+    from app.auth import passwords
+
     for account in _SERVICE_ACCOUNTS:
         try:
             async with session_scope() as session:
                 repo = UserRepository(session)
                 existing = await repo.get_by_username(account["username"])
                 if existing:
-                    logger.info("Service account '%s' already exists", account["username"])
+                    # Обновляем пароль чтобы всегда совпадал с кодом
+                    new_hash = passwords.hash_password(account["password"])
+                    from sqlalchemy import update as sa_update
+                    from app.db.models import User
+                    await session.execute(
+                        sa_update(User)
+                        .where(User.user_id == existing.user_id)
+                        .values(password_hash=new_hash)
+                    )
+                    logger.info("Service account '%s' password synced", account["username"])
                     continue
                 auth = AuthService(session)
                 user_id = await auth.register(
