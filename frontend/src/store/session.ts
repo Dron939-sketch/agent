@@ -36,7 +36,7 @@ export const useSession = create<SessionState>()(
       locale: "ru",
       onboarded: false,
       voiceReply: true,
-      voice: "madirus",
+      voice: "jarvis_fish",
       alwaysListening: false,
       setAuth: (token, username) => set({ token, username }),
       logout: () => set({ token: null, username: null }),
