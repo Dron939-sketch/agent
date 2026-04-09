@@ -387,6 +387,7 @@ async def _try_tool_use_chat(
     system_text: str,
     history_rows: list[dict],
     user_message: str,
+    user_id: str = "",
 ) -> tuple[str | None, bool]:
     if not Config.ANTHROPIC_API_KEY:
         return None, False
@@ -399,7 +400,7 @@ async def _try_tool_use_chat(
             msgs.append({"role": m["role"], "content": m["content"]})
     msgs.append({"role": "user", "content": user_message})
     try:
-        reply = await tool_chat.chat(system_text, msgs, max_tokens=1500, temperature=0.7)
+        reply = await tool_chat.chat(system_text, msgs, max_tokens=1500, temperature=0.7, user_id=user_id)
     except Exception as exc:
         logger.warning("tool-use chat failed: %s", exc)
         return None, False
@@ -495,7 +496,7 @@ async def send(
 
     if body.profile == "smart" and body.use_tools:
         response_text, used_tools = await _try_tool_use_chat(
-            system_text, history_rows, body.message
+            system_text, history_rows, body.message, user_id=user.user_id
         )
         if response_text:
             response_model = "claude-sonnet-4-6+tools"

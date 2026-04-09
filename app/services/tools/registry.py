@@ -28,6 +28,9 @@ def _build_schema(func: ToolFunc) -> JSON:
     properties: JSON = {}
     required: list[str] = []
     for name, param in sig.parameters.items():
+        # Параметры с _ в начале — внутренние, не показываем LLM
+        if name.startswith("_"):
+            continue
         annot = param.annotation if param.annotation is not inspect._empty else str
         json_type = _PY_TO_JSON.get(annot, "string")
         properties[name] = {"type": json_type}

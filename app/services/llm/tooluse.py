@@ -48,6 +48,7 @@ class ToolUseChat:
         *,
         max_tokens: int = 1500,
         temperature: float = 0.7,
+        user_id: str = "",
     ) -> str | None:
         """Возвращает финальный текстовый ответ.
 
@@ -108,6 +109,9 @@ class ToolUseChat:
                 tool_input = block.get("input", {})
                 tool_use_id = block.get("id", "")
                 try:
+                    # Передаём _user_id для tools которые его принимают
+                    if user_id:
+                        tool_input["_user_id"] = user_id
                     result = await self.registry.call(tool_name, **tool_input)
                     result_str = str(result)
                 except Exception as exc:
