@@ -193,55 +193,114 @@ export function VoiceWakeMode() {
     }
   }, [token, cleanupRecording]);
 
-  // --- Full loop pipeline ---
+  // --- Full loop pipeline (streaming: LLM → TTS по предложениям) ---
 
   const runFullLoop = useCallback(async (blob: Blob) => {
     setPhase("processing");
-    let response: FullLoopResponse;
+
+    // Очередь аудио-предложений для последовательного проигрывания
+    const audioQueue: string[] = []; // base64 mp3 chunks
+    let isPlaying = false;
+    let fullReply = "";
+    let interrupted = false;
+
+    const playNext = () => {
+      if (interrupted || audioQueue.length === 0) {
+        if (!interrupted && fullReply) {
+          // Все предложения проиграны
+          stopInterruptDetector();
+          returnToListening();
+        }
+        isPlaying = false;
+        return;
+      }
+      isPlaying = true;
+      const b64 = audioQueue.shift()!;
+      try {
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const audioBlob = new Blob([bytes], { type: "audio/mpeg" });
+        const url = URL.createObjectURL(audioBlob);
+        const player = new Audio(url);
+        playerRef.current = player;
+        player.onended = () => {
+          URL.revokeObjectURL(url);
+          playerRef.current = null;
+          playNext();
+        };
+        player.onerror = () => {
+          URL.revokeObjectURL(url);
+          playerRef.current = null;
+          playNext();
+        };
+        player.play().catch(() => {
+          playerRef.current = null;
+          playNext();
+        });
+      } catch {
+        playNext();
+      }
+    };
+
     try {
-      response = await voiceFullLoop(blob);
-      setResult(response);
+      const { streamVoiceReply } = await import("@/lib/api");
+
+      await streamVoiceReply(blob, (evt) => {
+        if (interrupted) return;
+
+        if (evt.type === "transcript") {
+          // Транскрипт пользователя получен — показываем
+          setResult((prev) => ({ ...prev, transcript: evt.text } as any));
+        } else if (evt.type === "token") {
+          // Текстовый токен от LLM — обновляем reply на UI
+          fullReply += evt.text;
+          setResult((prev) => ({ ...prev, reply: fullReply } as any));
+          // При первом токене переключаемся на speaking
+          if (fullReply.length === evt.text.length) {
+            setPhase("speaking");
+            startInterruptDetector();
+          }
+        } else if (evt.type === "audio") {
+          // Аудио предложения готово — в очередь
+          audioQueue.push(evt.audio);
+          if (!isPlaying) {
+            playNext();
+          }
+        } else if (evt.type === "error") {
+          setError(evt.message);
+        }
+      });
     } catch (err) {
-      setError((err as Error).message);
+      // Fallback на старый full-loop если stream-reply не работает
+      try {
+        const response = await voiceFullLoop(blob);
+        setResult(response);
+        if (response.reply) {
+          setPhase("speaking");
+          const audioUrl = await streamSpeech(response.reply.slice(0, 1000), { tone: "warm", voice });
+          const player = new Audio(audioUrl);
+          playerRef.current = player;
+          startInterruptDetector();
+          player.onended = () => { URL.revokeObjectURL(audioUrl); playerRef.current = null; stopInterruptDetector(); returnToListening(); };
+          player.onerror = () => { URL.revokeObjectURL(audioUrl); playerRef.current = null; stopInterruptDetector(); returnToListening(); };
+          await player.play();
+          return;
+        }
+      } catch (fallbackErr) {
+        setError((fallbackErr as Error).message);
+      }
       setPhase("error");
       setTimeout(() => returnToListening(), 3000);
       return;
     }
 
-    if (!response.reply) {
-      returnToListening();
-      return;
-    }
-
-    setPhase("speaking");
-    try {
-      const tone = response.fused_tone || "warm";
-      const audioUrl = await streamSpeech(response.reply.slice(0, 1000), { tone, voice });
-      const player = new Audio(audioUrl);
-      playerRef.current = player;
-
-      // Start interrupt detector — user can say "Стоп" to interrupt
-      startInterruptDetector();
-
-      player.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-        playerRef.current = null;
-        stopInterruptDetector();
-        returnToListening();
-      };
-      player.onerror = () => {
-        URL.revokeObjectURL(audioUrl);
-        playerRef.current = null;
-        stopInterruptDetector();
-        returnToListening();
-      };
-      await player.play();
-    } catch (err) {
-      setError(`TTS: ${(err as Error).message}`);
+    // Если LLM поток завершился но аудио ещё играет — ждём
+    if (!isPlaying && audioQueue.length === 0 && fullReply) {
       stopInterruptDetector();
       returnToListening();
     }
-  }, [voice, startInterruptDetector, stopInterruptDetector]);
+  }, [voice, startInterruptDetector, stopInterruptDetector, returnToListening]);
 
   // --- Interrupt detection: listen for "Стоп" during speaking ---
 

@@ -290,6 +290,60 @@ export async function voiceFullLoop(audio: Blob): Promise<FullLoopResponse> {
   return res.json();
 }
 
+/** Stream-reply event types from /api/voice/stream-reply SSE. */
+export type VoiceStreamEvent =
+  | { type: "transcript"; text: string; provider: string }
+  | { type: "token"; text: string }
+  | { type: "audio"; audio: string; sentence: string; provider: string }
+  | { type: "error"; message: string };
+
+/**
+ * Потоковый голосовой ответ: audio → STT → LLM stream → TTS по предложениям.
+ *
+ * Каждое предложение синтезируется и отправляется как base64 audio chunk.
+ * Фронт начинает играть первое предложение пока LLM генерит второе.
+ * Используйте onEvent для получения транскрипта, токенов текста и аудио-чанков.
+ */
+export async function streamVoiceReply(
+  audio: Blob,
+  onEvent: (evt: VoiceStreamEvent) => void,
+): Promise<void> {
+  const fd = new FormData();
+  fd.append("audio", audio, "voice.webm");
+  const res = await fetch(`${apiBase()}/api/voice/stream-reply`, {
+    method: "POST",
+    headers: { ...authHeaders() },
+    body: fd,
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`stream-reply ${res.status}: ${await res.text()}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const events = buf.split("\n\n");
+    buf = events.pop() ?? "";
+    for (const evt of events) {
+      for (const line of evt.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        let raw = line.slice(5);
+        if (raw.startsWith(" ")) raw = raw.slice(1);
+        if (!raw || raw === "end") continue;
+        try {
+          const parsed = JSON.parse(raw) as VoiceStreamEvent;
+          onEvent(parsed);
+        } catch {
+          // ignore malformed
+        }
+      }
+    }
+  }
+}
+
 // === Vision ===
 
 export async function analyzeImage(
