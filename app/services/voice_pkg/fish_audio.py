@@ -28,10 +28,10 @@ logger = get_logger(__name__)
 FISH_API_URL = "https://api.fish.audio/v1/tts"
 FISH_API_KEY = os.environ.get("FISH_AUDIO_API_KEY", "")
 
-# Готовый клон Джарвиса из каталога Fish Audio (48K+ пользователей)
+# Голос Джарвиса (русский) — выбран пользователем на Fish Audio
 JARVIS_VOICE_ID = os.environ.get(
     "FISH_AUDIO_JARVIS_VOICE_ID",
-    "612b878b113047d9a770c069c8b4fdfe",
+    "18be58f762644714b0756fd4d94c634c",
 )
 
 # Маппинг наших tone → Fish Audio emotion tags
