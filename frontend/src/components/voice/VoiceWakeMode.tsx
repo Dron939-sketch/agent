@@ -166,7 +166,7 @@ export function VoiceWakeMode() {
           }
         },
         threshold: 0.05,
-        silenceMs: 1000,
+        silenceMs: 2000,
       });
       vad.start();
       vadRef.current = vad;
