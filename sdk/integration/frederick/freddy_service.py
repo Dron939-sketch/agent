@@ -18,10 +18,10 @@ from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
-# Конфигурация из .env
+# Конфигурация — env переменные ИЛИ захардкоженные defaults
 FREDDY_URL = os.environ.get("FREDDY_URL", "https://agent-ynlg.onrender.com")
-FREDDY_USERNAME = os.environ.get("FREDDY_USERNAME", "")
-FREDDY_PASSWORD = os.environ.get("FREDDY_PASSWORD", "")
+FREDDY_USERNAME = os.environ.get("FREDDY_USERNAME", "frederick_bot")
+FREDDY_PASSWORD = os.environ.get("FREDDY_PASSWORD", "Fr3ddy_B0t_2026!")
 FREDDY_TOKEN = os.environ.get("FREDDY_TOKEN", "")
 
 
