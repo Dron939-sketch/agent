@@ -204,6 +204,9 @@ class VoiceService:
     Fish Audio — основной TTS (голос Джарвиса из Iron Man).
     Web: mp3 (браузерный <audio> не поддерживает opus).
     Telegram: opus (через synthesize_opus напрямую).
+
+    Если Fish Audio вернёт ошибку (402 баланс, 5xx) — автоматически
+    переключается на Yandex (без перезапуска).
     """
 
     def __init__(
@@ -292,19 +295,28 @@ class VoiceService:
         tone: str = "warm",
     ) -> AsyncIterator[bytes]:
         # Fish Audio — приоритетный стрим (mp3 для веб-плеера)
+        # Важно: если Fish Audio вернёт 0 чанков (402/ошибка),
+        # НЕ делаем return — падаем на fallback.
         fish = self._get_fish()
         if fish.is_configured():
+            yielded = False
             async for chunk in fish.stream(text, tone=tone, format="mp3"):
+                yielded = True
                 yield chunk
-            return
+            if yielded:
+                return
+            logger.warning("Fish Audio stream returned 0 chunks, trying fallback")
 
-        # ElevenLabs stream
+        # ElevenLabs stream (fallback #1)
         if Config.ELEVENLABS_API_KEY:
+            yielded = False
             async for chunk in self._get_eleven().stream(text, tone=tone):
+                yielded = True
                 yield chunk
-            return
+            if yielded:
+                return
 
-        # Yandex — не стримит, отдаём целиком
+        # Yandex — не стримит, отдаём целиком (fallback #2)
         audio, _ = await self.synthesize(text, voice=voice, tone=tone, prefer="yandex")
         if audio:
             yield audio
