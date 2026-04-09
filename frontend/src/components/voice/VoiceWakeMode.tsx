@@ -62,10 +62,93 @@ export function VoiceWakeMode() {
   const vadRef = useRef<SilenceDetector | null>(null);
   const playerRef = useRef<HTMLAudioElement | null>(null);
   const followUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const followUpIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const interruptDetectorRef = useRef<SpeechRecognition | null>(null);
   // Флаг, что приветствие уже сказано в этой сессии (чтобы не повторять
   // на каждый ре-mount / StrictMode double-invoke).
   const greetedRef = useRef<boolean>(false);
+
+  // --- Plain helper functions (NOT useCallback — avoids circular deps) ---
+
+  function stopInterruptDetector() {
+    if (interruptDetectorRef.current) {
+      try {
+        interruptDetectorRef.current.onresult = null;
+        interruptDetectorRef.current.onend = null;
+        interruptDetectorRef.current.onerror = null;
+        interruptDetectorRef.current.abort();
+      } catch {}
+      interruptDetectorRef.current = null;
+    }
+  }
+
+  function clearFollowUpTimer() {
+    if (followUpTimerRef.current) {
+      clearTimeout(followUpTimerRef.current);
+      followUpTimerRef.current = null;
+    }
+    if (followUpIntervalRef.current) {
+      clearInterval(followUpIntervalRef.current);
+      followUpIntervalRef.current = null;
+    }
+    setFollowUpCountdown(0);
+  }
+
+  function enterFollowUpMode() {
+    clearFollowUpTimer();
+    setPhase("follow_up");
+    setError(null);
+    setFollowUpCountdown(FOLLOW_UP_WINDOW_MS / 1000);
+    wakeRef.current?.pause();
+    const interval = setInterval(() => {
+      setFollowUpCountdown((prev) => {
+        if (prev <= 1) { clearInterval(interval); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+    followUpIntervalRef.current = interval;
+    followUpTimerRef.current = setTimeout(() => {
+      clearInterval(interval);
+      setFollowUpCountdown(0);
+      followUpTimerRef.current = null;
+      followUpIntervalRef.current = null;
+      setPhase("listening");
+      wakeRef.current?.resume();
+    }, FOLLOW_UP_WINDOW_MS);
+  }
+
+  function returnToListening() {
+    setError(null);
+    stopInterruptDetector();
+    setPhase("listening");
+    if (wakeRef.current) wakeRef.current.resume();
+  }
+
+  function startInterruptDetector() {
+    stopInterruptDetector();
+    const SRClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SRClass) return;
+    const sr = new SRClass();
+    sr.continuous = true;
+    sr.interimResults = true;
+    sr.lang = "ru-RU";
+    sr.onresult = (event: SpeechRecognitionEvent) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const text = event.results[i][0].transcript.toLowerCase().trim();
+        for (const sw of STOP_WORDS) {
+          if (text.includes(sw)) {
+            if (playerRef.current) { try { playerRef.current.pause(); } catch {} playerRef.current = null; }
+            stopInterruptDetector();
+            enterFollowUpMode();
+            return;
+          }
+        }
+      }
+    };
+    sr.onerror = () => {};
+    sr.onend = () => { interruptDetectorRef.current = null; };
+    try { sr.start(); interruptDetectorRef.current = sr; } catch {}
+  }
 
   // --- Cleanup helpers ---
 
@@ -83,26 +166,6 @@ export function VoiceWakeMode() {
     setLevel(new Array(48).fill(0));
   }, []);
 
-  const stopInterruptDetector = useCallback(() => {
-    if (interruptDetectorRef.current) {
-      try {
-        interruptDetectorRef.current.onresult = null;
-        interruptDetectorRef.current.onend = null;
-        interruptDetectorRef.current.onerror = null;
-        interruptDetectorRef.current.abort();
-      } catch {}
-      interruptDetectorRef.current = null;
-    }
-  }, []);
-
-  const clearFollowUpTimer = useCallback(() => {
-    if (followUpTimerRef.current) {
-      clearTimeout(followUpTimerRef.current);
-      followUpTimerRef.current = null;
-    }
-    setFollowUpCountdown(0);
-  }, []);
-
   const cleanupAll = useCallback(() => {
     cleanupRecording();
     clearFollowUpTimer();
@@ -117,7 +180,7 @@ export function VoiceWakeMode() {
       try { playerRef.current.pause(); } catch {}
       playerRef.current = null;
     }
-  }, [cleanupRecording, clearFollowUpTimer, stopInterruptDetector]);
+  }, [cleanupRecording]);
 
   // --- Wake word detected → start recording ---
 
@@ -300,94 +363,7 @@ export function VoiceWakeMode() {
       stopInterruptDetector();
       returnToListening();
     }
-  }, [voice, startInterruptDetector, stopInterruptDetector, returnToListening]);
-
-  // --- Interrupt detection: listen for "Стоп" during speaking ---
-
-  const startInterruptDetector = useCallback(() => {
-    stopInterruptDetector();
-    const SRClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SRClass) return;
-
-    const sr = new SRClass();
-    sr.continuous = true;
-    sr.interimResults = true;
-    sr.lang = "ru-RU";
-
-    sr.onresult = (event: SpeechRecognitionEvent) => {
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const text = event.results[i][0].transcript.toLowerCase().trim();
-        for (const sw of STOP_WORDS) {
-          if (text.includes(sw)) {
-            // Прерываем воспроизведение
-            if (playerRef.current) {
-              try { playerRef.current.pause(); } catch {}
-              playerRef.current = null;
-            }
-            stopInterruptDetector();
-            enterFollowUpMode();
-            return;
-          }
-        }
-      }
-    };
-    sr.onerror = () => {};
-    sr.onend = () => { interruptDetectorRef.current = null; };
-
-    try {
-      sr.start();
-      interruptDetectorRef.current = sr;
-    } catch {}
-  }, [stopInterruptDetector]);
-
-  // --- Follow-up mode: 30s window to continue dialogue without wake word ---
-
-  const enterFollowUpMode = useCallback(() => {
-    clearFollowUpTimer();
-    setPhase("follow_up");
-    setError(null);
-    setFollowUpCountdown(FOLLOW_UP_WINDOW_MS / 1000);
-
-    // Pause wake word detector — we're in direct conversation mode
-    wakeRef.current?.pause();
-
-    // Countdown display
-    const interval = setInterval(() => {
-      setFollowUpCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    // Auto-exit follow-up after timeout
-    followUpTimerRef.current = setTimeout(() => {
-      clearInterval(interval);
-      setFollowUpCountdown(0);
-      followUpTimerRef.current = null;
-      // Return to normal listening
-      setPhase("listening");
-      wakeRef.current?.resume();
-    }, FOLLOW_UP_WINDOW_MS);
-  }, [clearFollowUpTimer]);
-
-  // --- Return to listening after interaction ---
-
-  const returnToListening = useCallback(() => {
-    setError(null);
-    stopInterruptDetector();
-    // After a conversation — enter follow-up mode instead of cold listening
-    if (result?.reply) {
-      enterFollowUpMode();
-    } else {
-      setPhase("listening");
-      if (wakeRef.current) {
-        wakeRef.current.resume();
-      }
-    }
-  }, [result, enterFollowUpMode, stopInterruptDetector]);
+  }, [voice]);
 
   // --- Handle wake word detection ---
 
