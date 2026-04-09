@@ -36,6 +36,12 @@ YANDEX_VOICES = {
         "accent": "russian",
         "yandex_voice": "filipp",  # Mapping: jarvis → filipp с настройками
     },
+    "jarvis_local": {
+        "label": "Джарвис XTTS (локальный клон, GPU)",
+        "gender": "male",
+        "accent": "british",
+        "provider": "xtts",  # Coqui XTTS v2
+    },
     "filipp": {"label": "Филипп (спокойный)", "gender": "male"},
     "ermil": {"label": "Ермил (выразительный)", "gender": "male"},
     "zahar": {"label": "Захар (энергичный)", "gender": "male"},
@@ -230,6 +236,7 @@ class VoiceService:
         self.yandex = yandex or YandexSpeechKit()
         self._eleven = None
         self._hume = None
+        self._xtts = None
 
     def _get_eleven(self):
         if self._eleven is None:
@@ -244,6 +251,13 @@ class VoiceService:
 
             self._hume = HumeVoiceEmotion()
         return self._hume
+
+    def _get_xtts(self):
+        if self._xtts is None:
+            from app.services.voice_pkg.xtts import get_xtts
+
+            self._xtts = get_xtts()
+        return self._xtts
 
     async def transcribe(
         self,
@@ -270,8 +284,16 @@ class VoiceService:
         *,
         voice: str = "madirus",
         tone: str = "warm",
-        prefer: str = "auto",  # auto | elevenlabs | yandex
+        prefer: str = "auto",  # auto | elevenlabs | yandex | xtts
     ) -> tuple[bytes | None, str]:
+        # XTTS: локальный Джарвис — используется при voice=jarvis_local или prefer=xtts
+        if prefer == "xtts" or voice == "jarvis_local":
+            xtts = self._get_xtts()
+            if xtts.is_available():
+                audio = await xtts.synthesize_to_ogg(text)
+                if audio:
+                    return audio, "xtts"
+
         if prefer in ("auto", "elevenlabs") and Config.ELEVENLABS_API_KEY:
             audio = await self._get_eleven().synthesize(text, tone=tone)
             if audio:
@@ -280,6 +302,14 @@ class VoiceService:
             audio = await self.yandex.synthesize(text, voice=voice, tone=tone)
             if audio:
                 return audio, "yandex"
+
+        # Fallback: XTTS если ничего другого нет
+        xtts = self._get_xtts()
+        if xtts.is_available():
+            audio = await xtts.synthesize_to_ogg(text)
+            if audio:
+                return audio, "xtts"
+
         return None, "none"
 
     async def synthesize_stream(
@@ -289,6 +319,14 @@ class VoiceService:
         voice: str = "madirus",
         tone: str = "warm",
     ) -> AsyncIterator[bytes]:
+        # XTTS streaming для jarvis_local
+        if voice == "jarvis_local":
+            xtts = self._get_xtts()
+            if xtts.is_available():
+                async for chunk in xtts.synthesize_stream(text):
+                    yield chunk
+                return
+
         if Config.ELEVENLABS_API_KEY:
             async for chunk in self._get_eleven().stream(text, tone=tone):
                 yield chunk
