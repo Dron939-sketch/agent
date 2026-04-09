@@ -324,14 +324,35 @@ async def full_loop(
     else:
         history_rows = full_ctx.history[:-1] if full_ctx.history else []
         system_text = ContextAggregator.format_for_prompt(full_ctx, _base_system())
-        msgs: list[ChatMessage] = [ChatMessage(role="system", content=system_text)]
-        for m in history_rows:
-            msgs.append(ChatMessage(role=m["role"], content=m["content"]))  # type: ignore[arg-type]
-        msgs.append(ChatMessage(role="user", content=clean_transcript))
 
-        response = await default_router().chat(msgs, profile="smart")  # type: ignore[arg-type]
-        reply_text = response.text
-        reply_model = response.model
+        # Пробуем tool-use (напоминания, задачи и др.)
+        reply_text = None
+        try:
+            from app.services.llm.tooluse import ToolUseChat
+            tool_chat = ToolUseChat()
+            if tool_chat.is_available():
+                tool_msgs: list[dict] = []
+                for m in history_rows:
+                    if m["role"] in ("user", "assistant"):
+                        tool_msgs.append({"role": m["role"], "content": m["content"]})
+                tool_msgs.append({"role": "user", "content": clean_transcript})
+                reply_text = await tool_chat.chat(
+                    system_text, tool_msgs, max_tokens=1500, temperature=0.7,
+                    user_id=user.user_id,
+                )
+                if reply_text:
+                    reply_model = "claude-sonnet-4-6+tools"
+        except Exception as exc:
+            logger.warning("voice tool-use failed: %s", exc)
+
+        if not reply_text:
+            msgs: list[ChatMessage] = [ChatMessage(role="system", content=system_text)]
+            for m in history_rows:
+                msgs.append(ChatMessage(role=m["role"], content=m["content"]))  # type: ignore[arg-type]
+            msgs.append(ChatMessage(role="user", content=clean_transcript))
+            response = await default_router().chat(msgs, profile="smart")  # type: ignore[arg-type]
+            reply_text = response.text
+            reply_model = response.model
 
     await convos.add(user.user_id, "assistant", reply_text)
 

@@ -109,9 +109,13 @@ class ToolUseChat:
                 tool_input = block.get("input", {})
                 tool_use_id = block.get("id", "")
                 try:
-                    # Передаём _user_id для tools которые его принимают
-                    if user_id:
+                    # Инжектим _user_id для tools которые его принимают
+                    import inspect as _inspect
+                    _tool_func = self.registry.get(tool_name).func
+                    _sig = _inspect.signature(_tool_func)
+                    if "_user_id" in _sig.parameters and user_id:
                         tool_input["_user_id"] = user_id
+                    logger.info("tool call: %s, user_id=%s", tool_name, user_id[:8] if user_id else "none")
                     result = await self.registry.call(tool_name, **tool_input)
                     result_str = str(result)
                 except Exception as exc:
