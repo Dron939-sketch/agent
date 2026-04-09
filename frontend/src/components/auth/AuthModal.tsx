@@ -89,9 +89,9 @@ export function AuthModal() {
       const tokens = (await apiPost("/api/auth/login", {
         username: username.trim(),
         password
-      })) as { access_token: string };
+      })) as { access_token: string; refresh_token: string };
       localStorage.setItem("freddy_token", tokens.access_token);
-      setAuth(tokens.access_token, username.trim());
+      setAuth(tokens.access_token, username.trim(), tokens.refresh_token);
       setOpen(false);
       setPassword("");
     } catch (err) {

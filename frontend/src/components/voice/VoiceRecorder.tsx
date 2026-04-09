@@ -93,7 +93,15 @@ export function VoiceRecorder() {
       vad.start();
       vadRef.current = vad;
 
-      const recorder = new MediaRecorder(stream);
+      // Safari может не поддерживать webm — пробуем совместимый MIME
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : MediaRecorder.isTypeSupported("audio/mp4")
+            ? "audio/mp4"
+            : undefined;
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
       recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
       recorder.onstop = async () => {
