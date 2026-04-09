@@ -156,21 +156,62 @@ class YandexSpeechKit:
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key if api_key is not None else Config.YANDEX_API_KEY
 
-    async def transcribe(self, audio_bytes: bytes) -> str | None:
+    async def transcribe(self, audio_bytes: bytes, *, content_type: str = "audio/webm") -> str | None:
         if not self.api_key:
             return None
+
+        # Yandex STT принимает OGG/Opus нативно.
+        # WebM из браузера часто вызывает 400 — конвертируем если возможно.
+        data_to_send = audio_bytes
+        params: dict[str, str] = {"lang": "ru-RU"}
+
+        if "webm" in content_type:
+            converted = await self._convert_webm_to_ogg(audio_bytes)
+            if converted:
+                data_to_send = converted
+                params["format"] = "oggopus"
+            else:
+                # Отправляем как есть — может повезёт
+                params["format"] = "lpcm"
+
         headers = {"Authorization": f"Api-Key {self.api_key}"}
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    YANDEX_STT_URL, headers=headers, data=audio_bytes, timeout=10
+                    YANDEX_STT_URL, headers=headers, params=params,
+                    data=data_to_send, timeout=15,
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         return data.get("result") or None
-                    logger.error("Yandex STT %s", resp.status)
+                    body = await resp.text()
+                    logger.error("Yandex STT %s: %s", resp.status, body[:200])
         except Exception as exc:  # pragma: no cover
             logger.exception("Yandex STT error: %s", exc)
+        return None
+
+    @staticmethod
+    async def _convert_webm_to_ogg(audio_bytes: bytes) -> bytes | None:
+        """Конвертирует WebM → OGG/Opus через ffmpeg (если доступен)."""
+        import asyncio
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-i", "pipe:0", "-c:a", "libopus", "-f", "ogg", "pipe:1",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=audio_bytes), timeout=10
+            )
+            if proc.returncode == 0 and stdout:
+                return stdout
+            logger.debug("ffmpeg conversion failed: %s", stderr[:200] if stderr else "no output")
+        except FileNotFoundError:
+            logger.debug("ffmpeg not found — sending WebM as-is to Yandex STT")
+        except Exception as exc:
+            logger.debug("WebM→OGG conversion error: %s", exc)
         return None
 
     async def synthesize(
@@ -287,7 +328,7 @@ class VoiceService:
             if text:
                 return text, "deepgram"
         if Config.YANDEX_API_KEY:
-            text = await self.yandex.transcribe(audio_bytes)
+            text = await self.yandex.transcribe(audio_bytes, content_type=content_type)
             if text:
                 return text, "yandex"
         return None, "none"
