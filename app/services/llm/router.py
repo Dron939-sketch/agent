@@ -41,10 +41,10 @@ class LLMRouter:
         ollama = OllamaClient()  # локальный — всегда доступен как последний fallback
 
         smart_chain: list[LLMClient] = [
-            c for c in (anthropic, openai_smart, deepseek, ollama) if c is not None
+            c for c in (deepseek, anthropic, openai_smart, ollama) if c is not None
         ]
         fast_chain: list[LLMClient] = [
-            c for c in (openai_fast, deepseek, anthropic, ollama) if c is not None
+            c for c in (deepseek, openai_fast, anthropic, ollama) if c is not None
         ]
         cheap_chain: list[LLMClient] = [
             c for c in (deepseek, openai_fast, ollama) if c is not None
