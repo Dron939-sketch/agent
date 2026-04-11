@@ -58,11 +58,8 @@ function openAuth() {
   }
 }
 
-/**
- * Очередь TTS — каждое предложение прокидывается в streamSpeech и
- * проигрывается, как только придёт. Следующее предложение играет ТОЛЬКО
- * после того, как закончится текущее (`onended`).
- */
+const BUSY_TIMEOUT_MS = 90_000; // Safety: auto-reset busy after 90s
+
 class TTSQueue {
   private queue: string[] = [];
   private playing = false;
@@ -146,6 +143,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const queueRef = useRef<TTSQueue | null>(null);
+  const busyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function scrollToEnd() {
     queueMicrotask(() =>
@@ -163,6 +161,25 @@ export function ChatPanel({ id, onStateChange }: Props) {
     }
   }
 
+  function startBusy() {
+    setBusy(true);
+    // Safety timeout: auto-reset busy after 90s to prevent permanent lock
+    if (busyTimerRef.current) clearTimeout(busyTimerRef.current);
+    busyTimerRef.current = setTimeout(() => {
+      setBusy(false);
+      onStateChange?.("idle");
+      console.warn("Busy timeout: auto-reset after 90s");
+    }, BUSY_TIMEOUT_MS);
+  }
+
+  function stopBusy() {
+    setBusy(false);
+    if (busyTimerRef.current) {
+      clearTimeout(busyTimerRef.current);
+      busyTimerRef.current = null;
+    }
+  }
+
   async function onSend() {
     if (!input.trim() || busy) return;
     if (!token) {
@@ -175,7 +192,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
     const user = input.trim();
     setInput("");
     setMessages((m) => [...m, { role: "user", content: user }]);
-    setBusy(true);
+    startBusy();
     onStateChange?.("thinking");
 
     const imagePrompt = detectImageGenIntent(user);
@@ -204,7 +221,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
           }
         ]);
       } finally {
-        setBusy(false);
+        stopBusy();
         onStateChange?.("idle");
         scrollToEnd();
       }
@@ -215,13 +232,11 @@ export function ChatPanel({ id, onStateChange }: Props) {
       let acc = "";
       setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
-      const metaPromise = sendChat(user, { profile: "smart" }).catch(() => null);
+      // Fire meta request in background (non-blocking)
+      const metaPromise = sendChat(user, { profile: "fast" }).catch(() => null);
 
-      // Создаём TTS-очередь сразу — она будет получать предложения
-      // ПО МЕРЕ генерации, не дожидаясь конца ответа.
       let queue: TTSQueue | null = null;
       if (voiceReply) {
-        // tone узнаем после meta — пока стартуем с warm
         queue = new TTSQueue(voice, "warm", (s) => onStateChange?.(s));
         queueRef.current = queue;
       }
@@ -269,8 +284,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
       ]);
       if (is401) openAuth();
     } finally {
-      setBusy(false);
-      // не сбрасываем speaking — TTS queue ещё может играть
+      stopBusy();
       scrollToEnd();
     }
   }
@@ -289,7 +303,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
         imageUrl: URL.createObjectURL(file)
       }
     ]);
-    setBusy(true);
+    startBusy();
     onStateChange?.("thinking");
     try {
       const res = await analyzeImage(file, "Опиши изображение по-русски, кратко и точно.");
@@ -297,7 +311,6 @@ export function ChatPanel({ id, onStateChange }: Props) {
       if (voiceReply && res.text) {
         const queue = new TTSQueue(voice, "warm", (s) => onStateChange?.(s));
         queueRef.current = queue;
-        // Разбиваем длинный ответ на предложения локально
         const sentences = res.text.split(/(?<=[.!?…])\s+/).filter(Boolean);
         for (const s of sentences) queue.push(s);
       }
@@ -310,7 +323,7 @@ export function ChatPanel({ id, onStateChange }: Props) {
         }
       ]);
     } finally {
-      setBusy(false);
+      stopBusy();
       if (!voiceReply) onStateChange?.("idle");
       scrollToEnd();
     }
@@ -351,7 +364,10 @@ export function ChatPanel({ id, onStateChange }: Props) {
     }
   }, [token]);
 
-  useEffect(() => () => abortQueue(), []);
+  useEffect(() => () => {
+    abortQueue();
+    if (busyTimerRef.current) clearTimeout(busyTimerRef.current);
+  }, []);
 
   return (
     <section id={id} className="glass flex h-[560px] flex-col p-4">
