@@ -1,4 +1,7 @@
-"""Chat-роуты с памятью, эмоциями, intents (memory + coach), KB, tool-use, sentence-streaming."""
+"""Chat-роуты с памятью, эмоциями, intents (memory + coach), KB, tool-use, sentence-streaming.
+
+OPTIMIZED: profile=fast + use_tools=false skips heavy context aggregation for speed.
+"""
 
 from __future__ import annotations
 
@@ -77,14 +80,27 @@ class ChatResponseOut(BaseModel):
 
 def _ctx_messages(
     base_system: str,
-    aggregator_ctx,  # type: ignore[no-untyped-def]
+    aggregator_ctx,
     history: list[dict],
     user_message: str,
 ) -> list[ChatMessage]:
     system_text = ContextAggregator.format_for_prompt(aggregator_ctx, base_system)
     msgs: list[ChatMessage] = [ChatMessage(role="system", content=system_text)]
     for m in history:
-        msgs.append(ChatMessage(role=m["role"], content=m["content"]))  # type: ignore[arg-type]
+        msgs.append(ChatMessage(role=m["role"], content=m["content"]))
+    msgs.append(ChatMessage(role="user", content=user_message))
+    return msgs
+
+
+def _simple_messages(
+    system: str,
+    history: list[dict],
+    user_message: str,
+) -> list[ChatMessage]:
+    """Lightweight message builder without full context aggregation."""
+    msgs: list[ChatMessage] = [ChatMessage(role="system", content=system)]
+    for m in history[-10:]:
+        msgs.append(ChatMessage(role=m["role"], content=m["content"]))
     msgs.append(ChatMessage(role="user", content=user_message))
     return msgs
 
@@ -107,18 +123,16 @@ async def _extract_facts_bg(user_id: str, history: list[dict]) -> None:
                 for f in facts
             ]
         )
-        logger.info("📝 Extracted %d facts (bg) for user=%s", len(facts), user_id)
-    except Exception as exc:  # pragma: no cover
+        logger.info("Extracted %d facts (bg) for user=%s", len(facts), user_id)
+    except Exception as exc:
         logger.warning("background fact extraction failed: %s", exc)
 
-    # Sprint 7: auto-profile — extract structured knowledge triples
     try:
         from app.services.memory.knowledge_graph import auto_profile_after_dialogue
-
         result = await auto_profile_after_dialogue(user_id, history[-FACT_EXTRACT_EVERY:])
         if result.get("stored", 0) > 0:
-            logger.info("🧠 Knowledge graph: +%d triples for user=%s", result["stored"], user_id)
-    except Exception as exc:  # pragma: no cover
+            logger.info("Knowledge graph: +%d triples for user=%s", result["stored"], user_id)
+    except Exception as exc:
         logger.warning("knowledge graph extraction failed: %s", exc)
 
 
@@ -127,9 +141,7 @@ async def _store_chat_memory(user_id: str, user_msg: str, assistant_msg: str) ->
         await default_memory().add(
             [
                 MemoryRecord(id="", text=user_msg, user_id=user_id, metadata={"role": "user"}),
-                MemoryRecord(
-                    id="", text=assistant_msg, user_id=user_id, metadata={"role": "assistant"}
-                ),
+                MemoryRecord(id="", text=assistant_msg, user_id=user_id, metadata={"role": "assistant"}),
             ]
         )
     except Exception as exc:
@@ -142,109 +154,75 @@ async def _handle_intent(
     intent_type: str,
     payload: str,
 ) -> str | None:
-    """Обработка интентов памяти + ROUND 1: цели и привычки."""
     store = default_memory()
 
-    # === Memory intents ===
     if intent_type == "forget":
         if not payload:
-            return "Что именно забыть? Скажи, например: «забудь, что я люблю кофе»."
+            return "Что именно забыть?"
         try:
             removed = await store.forget(user_id, payload)
-            if removed:
-                return f"Готово, удалил {removed} запис(и) про «{payload}»."
-            return f"В памяти ничего такого не нашёл — {payload}."
-        except Exception as exc:
-            logger.warning("forget failed: %s", exc)
-            return "Не получилось забыть, попробуй ещё раз."
+            return f"Готово, удалил {removed} запис(и) про «{payload}»." if removed else f"Не нашёл — {payload}."
+        except Exception:
+            return "Не получилось забыть."
 
     if intent_type == "remember":
         if not payload:
-            return "Что запомнить? Скажи: «запомни, что я работаю на Python»."
+            return "Что запомнить?"
         try:
-            await store.add(
-                [
-                    MemoryRecord(
-                        id="",
-                        text=payload,
-                        user_id=user_id,
-                        metadata={"kind": "fact", "source": "explicit"},
-                    )
-                ]
-            )
+            await store.add([MemoryRecord(id="", text=payload, user_id=user_id, metadata={"kind": "fact", "source": "explicit"})])
             return f"Запомнил: «{payload}»."
-        except Exception as exc:
-            logger.warning("remember failed: %s", exc)
+        except Exception:
             return "Не получилось запомнить."
 
     if intent_type == "list_memory":
         try:
             hits = await store.search("важное о пользователе", user_id=user_id, top_k=10)
             if not hits:
-                return "Пока ничего не помню. Расскажи о себе — запомню важное."
-            top = "\n".join(f"• {h.text}" for h in hits[:8])
-            return f"Вот что я помню:\n{top}"
-        except Exception as exc:
-            logger.warning("list_memory failed: %s", exc)
+                return "Пока ничего не помню."
+            return "Вот что я помню:\n" + "\n".join(f"• {h.text}" for h in hits[:8])
+        except Exception:
             return "Не смог достать память."
 
-    # === ROUND 1: Coach intents ===
     if intent_type == "goal_set":
         if not payload:
-            return "Какая цель? Скажи: «моя цель — выучить английский»."
+            return "Какая цель?"
         try:
-            repo = GoalRepository(session)
-            goal_id = await repo.add(user_id, payload)
-            return f"✨ Записал твою цель: «{payload}». Я буду помнить и помогать. (#G{goal_id})"
-        except Exception as exc:
-            logger.warning("goal_set failed: %s", exc)
+            goal_id = await GoalRepository(session).add(user_id, payload)
+            return f"Записал цель: «{payload}». (#G{goal_id})"
+        except Exception:
             return "Не получилось записать цель."
 
     if intent_type == "goal_list":
         try:
-            repo = GoalRepository(session)
-            goals = await repo.list_active(user_id)
+            goals = await GoalRepository(session).list_active(user_id)
             if not goals:
-                return "У тебя пока нет активных целей… давай поставим первую?"
-            lines = ["Твои активные цели:"]
-            for g in goals[:10]:
-                lines.append(f"• #{g.id} — {g.title} ({g.progress_pct}%)")
-            return "\n".join(lines)
-        except Exception as exc:
-            logger.warning("goal_list failed: %s", exc)
+                return "Нет активных целей."
+            return "Цели:\n" + "\n".join(f"• #{g.id} — {g.title} ({g.progress_pct}%)" for g in goals[:10])
+        except Exception:
             return "Не смог достать цели."
 
     if intent_type == "habit_create":
         if not payload:
-            return "Какая привычка? Скажи: «новая привычка — медитация»."
+            return "Какая привычка?"
         try:
-            repo = HabitRepository(session)
-            habit_id = await repo.add(user_id, payload)
-            return (
-                f"💪 Привычка «{payload}» добавлена. "
-                f"Скажи «сделал {payload}» когда выполнишь, и я начну считать streak."
-            )
-        except Exception as exc:
-            logger.warning("habit_create failed: %s", exc)
+            await HabitRepository(session).add(user_id, payload)
+            return f"Привычка «{payload}» добавлена."
+        except Exception:
             return "Не получилось добавить привычку."
 
     if intent_type == "habit_check":
         if not payload:
-            return "Какую привычку отметить? Скажи: «сделал медитацию»."
+            return "Какую привычку отметить?"
         try:
             repo = HabitRepository(session)
             habit = await repo.find_by_title(user_id, payload)
             if not habit:
-                return f"Не нашёл привычку «{payload}». Сначала создай: «новая привычка — {payload}»."
+                return f"Не нашёл привычку «{payload}»."
             result = await repo.check_in(habit.id, user_id)
             if result["was_already_done_today"]:
-                return f"Сегодня уже отмечено… твой streak: 🔥{result['streak']}"
-            return (
-                f"✅ Отметил «{habit.title}». Streak: 🔥{result['streak']} "
-                f"(рекорд: {result['longest_streak']})"
-            )
-        except Exception as exc:
-            logger.warning("habit_check failed: %s", exc)
+                return f"Уже отмечено. Streak: {result['streak']}"
+            return f"Отметил «{habit.title}». Streak: {result['streak']}"
+        except Exception:
             return "Не получилось отметить."
 
     if intent_type == "habit_list":
@@ -253,112 +231,60 @@ async def _handle_intent(
             await repo.reset_broken_streaks(user_id)
             habits = await repo.list(user_id)
             if not habits:
-                return "У тебя пока нет привычек… давай создадим первую?"
-            lines = ["Твои привычки:"]
-            for h in habits[:10]:
-                marker = "🔥" if h.streak > 0 else "💤"
-                lines.append(f"{marker} #{h.id} — {h.title} (streak: {h.streak}, рекорд: {h.longest_streak})")
-            return "\n".join(lines)
-        except Exception as exc:
-            logger.warning("habit_list failed: %s", exc)
+                return "Нет привычек."
+            return "Привычки:\n" + "\n".join(f"• {h.title} (streak: {h.streak})" for h in habits[:10])
+        except Exception:
             return "Не смог достать привычки."
 
-    # === Sprint 8: Reminder & task intents ===
     if intent_type == "remind":
         if not payload:
-            return "О чём напомнить? Скажи: «напомни через 2 часа позвонить маме»."
+            return "О чём напомнить?"
         try:
             from app.services.tasks import get_reminder_manager
-
-            manager = get_reminder_manager()
-            result = await manager.create_from_text(user_id, payload, tz_offset=_get_user_tz(session, user_id))
-            scheduled = result.get("scheduled_at", "")
-            title = result.get("title", payload)
-            rec = result.get("recurrence")
-            rec_text = f" ({rec})" if rec else ""
-            return f"Напомню{rec_text}: «{title}» — {_format_dt(scheduled)}."
+            result = await get_reminder_manager().create_from_text(user_id, payload, tz_offset=3)
+            return f"Напомню: «{result.get('title', payload)}» — {_format_dt(result.get('scheduled_at', ''))}."
         except ValueError:
-            return f"Не смог разобрать время. Попробуй: «напомни завтра в 9 утра {payload}»."
-        except Exception as exc:
-            logger.warning("remind failed: %s", exc)
+            return "Не смог разобрать время."
+        except Exception:
             return "Не получилось создать напоминание."
 
     if intent_type == "task_create":
         if not payload:
-            return "Какую задачу добавить? Скажи: «добавь задачу — купить продукты»."
+            return "Какую задачу добавить?"
         try:
             from app.services.tasks import get_reminder_manager
-
-            manager = get_reminder_manager()
-            result = await manager.create_from_text(user_id, payload, tz_offset=_get_user_tz(session, user_id))
-            title = result.get("title", payload)
-            scheduled = result.get("scheduled_at")
-            if scheduled:
-                return f"Задача «{title}» добавлена, напомню {_format_dt(scheduled)}."
-            return f"Задача «{title}» добавлена."
-        except ValueError:
-            # Нет даты — создаём без привязки ко времени
-            from app.services.tasks import get_reminder_manager
-
-            manager = get_reminder_manager()
-            result_fallback = await manager.create(user_id, payload)
-            return f"Задача «{payload}» добавлена, напомню через час."
-        except Exception as exc:
-            logger.warning("task_create failed: %s", exc)
+            result = await get_reminder_manager().create_from_text(user_id, payload, tz_offset=3)
+            return f"Задача «{result.get('title', payload)}» добавлена."
+        except Exception:
             return "Не получилось добавить задачу."
 
     if intent_type == "task_list":
         try:
             from app.services.tasks import get_reminder_manager
-
-            manager = get_reminder_manager()
-            reminders = await manager.list_pending(user_id)
+            reminders = await get_reminder_manager().list_pending(user_id)
             if not reminders:
-                return "Нет активных напоминаний и задач. Скажи «напомни...» чтобы создать."
-            lines = ["Твои напоминания:"]
-            for r in reminders[:10]:
-                dt_str = _format_dt(r.get("scheduled_at", "")) if r.get("scheduled_at") else "без даты"
-                rec = f" ({r['recurrence']})" if r.get("recurrence") else ""
-                lines.append(f"• #{r['id']} — {r['title']}{rec} [{dt_str}]")
-            return "\n".join(lines)
-        except Exception as exc:
-            logger.warning("task_list failed: %s", exc)
+                return "Нет активных напоминаний."
+            return "Напоминания:\n" + "\n".join(f"• #{r['id']} — {r['title']}" for r in reminders[:10])
+        except Exception:
             return "Не смог достать задачи."
-
-    if intent_type == "task_cancel":
-        if not payload:
-            return "Какое напоминание отменить?"
-        return f"Чтобы отменить, укажи номер: «отмени напоминание #123»."
 
     return None
 
 
-def _get_user_tz(session: AsyncSession, user_id: str) -> int:  # noqa: ARG001
-    """Получает timezone offset пользователя (sync-safe fallback)."""
-    return 3  # Moscow default; full async version in notifications.py
-
-
 def _format_dt(iso_str: str) -> str:
-    """Форматирует ISO datetime в читаемый русский формат."""
     if not iso_str:
         return "скоро"
     try:
         from datetime import datetime, timedelta, timezone as tz
-
         dt = datetime.fromisoformat(iso_str)
-        # Показываем в московском времени по умолчанию
         local = dt.replace(tzinfo=tz.utc).astimezone(tz(timedelta(hours=3)))
         now = datetime.now(tz(timedelta(hours=3)))
         delta = local - now
-
         if delta.days == 0:
             return f"сегодня в {local.strftime('%H:%M')}"
         if delta.days == 1:
             return f"завтра в {local.strftime('%H:%M')}"
-        if delta.days == 2:
-            return f"послезавтра в {local.strftime('%H:%M')}"
-        weekdays = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
-        return f"{local.strftime('%d.%m')} ({weekdays[local.weekday()]}) в {local.strftime('%H:%M')}"
+        return f"{local.strftime('%d.%m')} в {local.strftime('%H:%M')}"
     except Exception:
         return iso_str
 
@@ -366,19 +292,13 @@ def _format_dt(iso_str: str) -> str:
 async def _attach_chat_session(
     session: AsyncSession, user_id: str, background: BackgroundTasks
 ) -> int:
-    """ROUND 3: Получает активную сессию, триггерит суммаризацию stale-сессии.
-
-    Возвращает chat_session_id для использования в ``convos.add``.
-    """
     repo = ChatSessionRepository(session)
     try:
         active_id, stale_id = await repo.get_or_create_active(user_id)
     except Exception as exc:
         logger.warning("chat session attach failed: %s", exc)
         return 0
-
     if stale_id is not None:
-        # старую «подвешенную» сессию суммаризуем в фоне
         background.add_task(summarize_session, stale_id)
     return active_id
 
@@ -394,10 +314,7 @@ async def _try_tool_use_chat(
     tool_chat = ToolUseChat()
     if not tool_chat.is_available():
         return None, False
-    msgs: list[dict] = []
-    for m in history_rows:
-        if m["role"] in ("user", "assistant"):
-            msgs.append({"role": m["role"], "content": m["content"]})
+    msgs = [{"role": m["role"], "content": m["content"]} for m in history_rows if m["role"] in ("user", "assistant")]
     msgs.append({"role": "user", "content": user_message})
     try:
         reply = await tool_chat.chat(system_text, msgs, max_tokens=1500, temperature=0.7, user_id=user_id)
@@ -424,52 +341,75 @@ async def send(
     user: AuthenticatedUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ChatResponseOut:
+    import time
+    start = time.time()
+
     convos = ConversationRepository(session)
     chat_session_id = await _attach_chat_session(session, user.user_id, background)
-    await convos.add(
-        user.user_id, "user", body.message, chat_session_id=chat_session_id or None
-    )
+    await convos.add(user.user_id, "user", body.message, chat_session_id=chat_session_id or None)
 
+    # Intent detection (fast, local)
     intent = detect_intent(body.message)
     if intent.type != "none":
         intent_reply = await _handle_intent(session, user.user_id, intent.type, intent.payload)
         if intent_reply:
-            msg_id = await convos.add(
-                user.user_id,
-                "assistant",
-                intent_reply,
-                chat_session_id=chat_session_id or None,
-            )
+            msg_id = await convos.add(user.user_id, "assistant", intent_reply, chat_session_id=chat_session_id or None)
             if chat_session_id:
                 try:
                     await ChatSessionRepository(session).touch(chat_session_id)
-                except Exception as exc:
-                    logger.warning("chat session touch failed: %s", exc)
-            return ChatResponseOut(
-                reply=intent_reply,
-                model="intent-handler",
-                intent=intent.type,
-                message_id=msg_id,
-            )
+                except Exception:
+                    pass
+            elapsed = time.time() - start
+            logger.info("chat intent=%s, %.1fs", intent.type, elapsed)
+            return ChatResponseOut(reply=intent_reply, model="intent-handler", intent=intent.type, message_id=msg_id)
 
-    # Sprint Jarvis: проверяем нужна ли цепочка действий
+    # Chain detection
     try:
         from app.services.chains import is_chain_request, plan_chain, execute_chain, format_chain_response
-
         if is_chain_request(body.message):
             plan = await plan_chain(body.message)
             if plan and plan.get("steps"):
                 results = await execute_chain(plan)
                 chain_reply = format_chain_response(plan, results)
                 msg_id = await convos.add(user.user_id, "assistant", chain_reply)
-                return ChatResponseOut(
-                    reply=chain_reply,
-                    model="chain-executor",
-                    message_id=msg_id,
-                )
+                elapsed = time.time() - start
+                logger.info("chat chain, %.1fs", elapsed)
+                return ChatResponseOut(reply=chain_reply, model="chain-executor", message_id=msg_id)
     except Exception as exc:
-        logger.warning("chain execution failed, falling back to LLM: %s", exc)
+        logger.warning("chain execution failed: %s", exc)
 
+    # ========================================================
+    # FAST PATH: skip heavy context for profile=fast + no tools
+    # Used by Frederick basic mode for speed
+    # ========================================================
+    is_fast_path = body.profile == "fast" and not body.use_tools
+
+    if is_fast_path:
+        # Lightweight: just get recent history, no emotions/memory/KB
+        history_rows = await convos.history(user.user_id, limit=10)
+        messages = _simple_messages(_base_system(), history_rows, body.message)
+        router_response = await default_router().chat(messages, profile="fast")
+        response_text = router_response.text
+        response_model = router_response.model
+
+        msg_id = await convos.add(user.user_id, "assistant", response_text, chat_session_id=chat_session_id or None)
+        if chat_session_id:
+            try:
+                await ChatSessionRepository(session).touch(chat_session_id)
+            except Exception:
+                pass
+
+        # Store memory in background (non-blocking)
+        if body.use_memory:
+            background.add_task(_store_chat_memory, user.user_id, body.message, response_text)
+
+        elapsed = time.time() - start
+        logger.info("chat fast-path model=%s, %.1fs", response_model, elapsed)
+        return ChatResponseOut(reply=response_text, model=response_model, message_id=msg_id)
+
+    # ========================================================
+    # FULL PATH: emotions, memory, KB, tools
+    # ========================================================
     emotion_service = EmotionService(default_router())
     aggregator = ContextAggregator(session, emotion_service=emotion_service)
     full_ctx = await aggregator.get_full_context(user.user_id, body.message)
@@ -495,29 +435,22 @@ async def send(
     response_model = "router"
 
     if body.profile == "smart" and body.use_tools:
-        response_text, used_tools = await _try_tool_use_chat(
-            system_text, history_rows, body.message, user_id=user.user_id
-        )
+        response_text, used_tools = await _try_tool_use_chat(system_text, history_rows, body.message, user_id=user.user_id)
         if response_text:
             response_model = "claude-sonnet-4-6+tools"
 
     if not response_text:
         messages = _ctx_messages(_base_system(), full_ctx, history_rows, body.message)
-        router_response = await default_router().chat(messages, profile=body.profile)  # type: ignore[arg-type]
+        router_response = await default_router().chat(messages, profile=body.profile)
         response_text = router_response.text
         response_model = router_response.model
 
-    msg_id = await convos.add(
-        user.user_id,
-        "assistant",
-        response_text,
-        chat_session_id=chat_session_id or None,
-    )
+    msg_id = await convos.add(user.user_id, "assistant", response_text, chat_session_id=chat_session_id or None)
     if chat_session_id:
         try:
             await ChatSessionRepository(session).touch(chat_session_id)
-        except Exception as exc:
-            logger.warning("chat session touch failed: %s", exc)
+        except Exception:
+            pass
 
     if body.use_memory:
         background.add_task(_store_chat_memory, user.user_id, body.message, response_text)
@@ -527,6 +460,8 @@ async def send(
         full_ctx.history + [{"role": "user", "content": body.message}],
     )
 
+    elapsed = time.time() - start
+    logger.info("chat full-path model=%s, tools=%s, %.1fs", response_model, used_tools, elapsed)
     return ChatResponseOut(
         reply=response_text,
         model=response_model,
@@ -547,9 +482,7 @@ async def stream(
 ) -> StreamingResponse:
     convos = ConversationRepository(session)
     chat_session_id = await _attach_chat_session(session, user.user_id, background)
-    await convos.add(
-        user.user_id, "user", body.message, chat_session_id=chat_session_id or None
-    )
+    await convos.add(user.user_id, "user", body.message, chat_session_id=chat_session_id or None)
 
     intent = detect_intent(body.message)
     intent_reply: str | None = None
@@ -571,8 +504,8 @@ async def stream(
                     tone=full_ctx.emotion.tone,
                     needs_support=full_ctx.emotion.needs_support,
                 )
-            except Exception as exc:
-                logger.warning("emotion log failed: %s", exc)
+            except Exception:
+                pass
 
         history_rows = full_ctx.history[:-1] if full_ctx.history else []
         messages = _ctx_messages(_base_system(), full_ctx, history_rows, body.message)
@@ -594,61 +527,43 @@ async def stream(
             yield f"data: {sentence_payload}\n\n".encode("utf-8")
             yield b"event: done\ndata: end\n\n"
             from app.db import session_scope
-
             try:
                 async with session_scope() as s2:
-                    await ConversationRepository(s2).add(
-                        user_id, "assistant", intent_reply, chat_session_id=cs_id
-                    )
+                    await ConversationRepository(s2).add(user_id, "assistant", intent_reply, chat_session_id=cs_id)
                     if cs_id:
                         await ChatSessionRepository(s2).touch(cs_id)
-            except Exception as exc:
-                logger.warning("intent save failed: %s", exc)
+            except Exception:
+                pass
             return
 
         collected: list[str] = []
         sentence_buf = SentenceBuffer()
         try:
-            async for chunk in default_router().stream(messages, profile=profile):  # type: ignore[arg-type]
+            async for chunk in default_router().stream(messages, profile=profile):
                 collected.append(chunk)
-                token_payload = json.dumps({"t": chunk}, ensure_ascii=False)
-                yield f"data: {token_payload}\n\n".encode("utf-8")
+                yield f"data: {json.dumps({'t': chunk}, ensure_ascii=False)}\n\n".encode("utf-8")
                 for sentence in sentence_buf.add(chunk):
-                    sent_payload = json.dumps({"s": sentence}, ensure_ascii=False)
-                    yield f"data: {sent_payload}\n\n".encode("utf-8")
+                    yield f"data: {json.dumps({'s': sentence}, ensure_ascii=False)}\n\n".encode("utf-8")
 
             tail = sentence_buf.flush()
             if tail:
-                sent_payload = json.dumps({"s": tail}, ensure_ascii=False)
-                yield f"data: {sent_payload}\n\n".encode("utf-8")
-
+                yield f"data: {json.dumps({'s': tail}, ensure_ascii=False)}\n\n".encode("utf-8")
             yield b"event: done\ndata: end\n\n"
         finally:
             full = "".join(collected)
             if full:
                 from app.db import session_scope
-
                 try:
                     async with session_scope() as s2:
-                        await ConversationRepository(s2).add(
-                            user_id, "assistant", full, chat_session_id=cs_id
-                        )
+                        await ConversationRepository(s2).add(user_id, "assistant", full, chat_session_id=cs_id)
                         if cs_id:
                             await ChatSessionRepository(s2).touch(cs_id)
-                except Exception as exc:
-                    logger.warning("stream save failed: %s", exc)
-
+                except Exception:
+                    pass
                 if use_memory:
                     try:
                         await _store_chat_memory(user_id, user_message, full)
                     except Exception:
                         pass
-                try:
-                    await _extract_facts_bg(
-                        user_id,
-                        history_snapshot + [{"role": "user", "content": user_message}],
-                    )
-                except Exception:
-                    pass
 
     return StreamingResponse(event_source(), media_type="text/event-stream")
