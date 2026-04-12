@@ -160,6 +160,18 @@ services:
     healthCheckPath: /
     autoDeploy: true
     envVars:
+      # BACKEND_API_URL — RUNTIME server-side env для Next.js rewrites().
+      # Читается только сервером Next.js при старте, в бандл не попадает.
+      # Позволяет браузеру ходить на same-origin (`/api/*`), а Next.js
+      # сервер проксирует запросы на бэкенд (intra-Render, быстро).
+      # Это критично для РФ-пользователей без VPN: больше никаких прямых
+      # браузерных TLS-коннектов к onrender.com/cloudflare.
+      - key: BACKEND_API_URL
+        value: https://agent-ynlg.onrender.com
+      # NEXT_PUBLIC_API_URL нужен ТОЛЬКО для WebSocket (Next.js rewrites
+      # не умеют проксировать HTTP Upgrade). Если вы ставите фронт за
+      # свой собственный Caddy/nginx с поддержкой WS — этот env можно
+      # удалить и WS пойдут через same-origin.
       - key: NEXT_PUBLIC_API_URL
         value: https://agent-ynlg.onrender.com
       - key: NEXT_PUBLIC_VAPID_PUBLIC_KEY
