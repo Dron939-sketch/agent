@@ -60,19 +60,56 @@ export type StreamEvent =
   | { type: "token"; text: string }
   | { type: "sentence"; text: string };
 
+/**
+ * Резолв базового URL для HTTP-вызовов API.
+ *
+ * С версии fix-latency-OFQzb фронт в браузере по умолчанию ходит на
+ * same-origin (пустая строка → относительные URL). Next.js сервер
+ * проксирует `/api/*`, `/health`, `/integrations` на бэкенд через
+ * `rewrites()` в `next.config.mjs` (см. BACKEND_API_URL).
+ *
+ * Зачем это нужно: CloudFlare/onrender.com в РФ без VPN дросселируется
+ * провайдерами, и каждый прямой fetch с браузера давал многосекундный
+ * TTFB. Теперь браузер стучится только в свой origin (fredium.ru).
+ *
+ * NEXT_PUBLIC_API_URL — embed'ится в бандл и намеренно НЕ используется
+ * для HTTP, чтобы исключить прямой cross-origin коннект. Он нужен
+ * только для WebSocket (см. `resolveWsUrl`). Для override в dev
+ * есть NEXT_PUBLIC_HTTP_API_URL.
+ */
 export function resolveApiUrl(): string {
-  const envUrl = process.env.NEXT_PUBLIC_API_URL;
-  if (envUrl) return envUrl.replace(/\/$/, "");
+  const override = process.env.NEXT_PUBLIC_HTTP_API_URL;
+  if (override) return override.replace(/\/$/, "");
 
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
-    if (host.includes("agent-frontend") || host === "agent-ynlg.onrender.com") {
-      return "https://agent-ynlg.onrender.com";
-    }
     if (host === "localhost" || host === "127.0.0.1") {
       return "http://localhost:8000";
     }
-    return "https://agent-ynlg.onrender.com";
+    // Прод: same-origin. Относительные пути `/api/...` будут
+    // отresolve'ены браузером в `https://<current-host>/api/...`.
+    return "";
+  }
+  return "http://localhost:8000";
+}
+
+/**
+ * WebSocket base. В отличие от HTTP, Next.js rewrites НЕ проксируют
+ * WS (нет HTTP Upgrade). Поэтому WS-коннект идёт либо:
+ *   1) на NEXT_PUBLIC_API_URL (явный override),
+ *   2) через reverse-proxy на том же origin (если сверху стоит
+ *      Caddy/nginx — см. caddy/Caddyfile в корне репо),
+ *   3) в dev — localhost:8000.
+ */
+export function resolveWsUrl(): string {
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (envUrl) return envUrl.replace(/\/$/, "");
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") {
+      return "http://localhost:8000";
+    }
+    return window.location.origin;
   }
   return "http://localhost:8000";
 }
@@ -252,7 +289,7 @@ export function openAgentSocket(
     onEvent({ type: "error", message: "missing auth token" });
     return null;
   }
-  const base = apiBase();
+  const base = resolveWsUrl();
   const wsBase = base.startsWith("https") ? base.replace("https", "wss") : base.replace("http", "ws");
   const ws = new WebSocket(`${wsBase}/api/agents/ws?token=${encodeURIComponent(token)}`);
   ws.onopen = () => ws.send(JSON.stringify(payload));
@@ -564,7 +601,7 @@ export function openTriggerSocket(
 ): WebSocket | null {
   const token = getToken();
   if (!token) return null;
-  const base = apiBase();
+  const base = resolveWsUrl();
   const wsBase = base.startsWith("https") ? base.replace("https", "wss") : base.replace("http", "ws");
   const ws = new WebSocket(`${wsBase}/api/triggers/ws?token=${encodeURIComponent(token)}`);
   ws.onmessage = (ev) => {
